@@ -53,8 +53,8 @@ function uipress_analytics_bridge_admin_init() {
     
     // Register AJAX handlers
     add_action('wp_ajax_uipress_analytics_bridge_connect', array($admin, 'connect_to_google_analytics'));
-    add_action('wp_ajax_uipress_analytics_bridge_get_properties', array($admin, 'get_analytics_properties'));
-    add_action('wp_ajax_uipress_analytics_bridge_save_property', array($admin, 'save_analytics_property'));
+    add_action('wp_ajax_uipress_analytics_bridge_get_properties', 'uipress_analytics_bridge_get_properties');
+    add_action('wp_ajax_uipress_analytics_bridge_save_property', 'uipress_analytics_bridge_save_selected_property');
     add_action('wp_ajax_uipress_analytics_bridge_disconnect', 'uipress_analytics_bridge_simple_disconnect');
     add_action('wp_ajax_uipress_analytics_bridge_clear_cache', 'uipress_analytics_bridge_clear_cache');
     add_action('wp_ajax_uipress_analytics_bridge_oauth_callback', 'uipress_analytics_bridge_simple_oauth_callback');
@@ -64,105 +64,275 @@ function uipress_analytics_bridge_admin_init() {
  * Handle OAuth callback from Google
  */
 function uipress_analytics_bridge_simple_oauth_callback() {
-    // This creates a page that displays in the popup after Google auth
-    ?>
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Google Authentication</title>
-        <style>
-            body {
-                font-family: Arial, sans-serif;
-                text-align: center;
-                padding: 50px;
-                background: #f8f9fa;
-            }
-            .success {
-                color: #28a745;
-                font-size: 24px;
-                margin-bottom: 20px;
-            }
-            .error {
-                color: #dc3545;
-                font-size: 24px;
-                margin-bottom: 20px;
-            }
-            .loading {
-                display: inline-block;
-                width: 50px;
-                height: 50px;
-                border: 3px solid rgba(0,0,0,.3);
-                border-radius: 50%;
-                border-top-color: #007bff;
-                animation: spin 1s ease-in-out infinite;
-            }
-            @keyframes spin {
-                to { transform: rotate(360deg); }
-            }
-        </style>
-    </head>
-    <body>
-        <?php 
-        // Check if we got a code
-        if (isset($_GET['code']) && !empty($_GET['code'])) {
-            $auth_code = $_GET['code'];
-            
-            // Get settings for API credentials
-            $settings = get_option('uipress_analytics_bridge_settings', array());
-            $client_id = isset($settings['client_id']) ? $settings['client_id'] : '';
-            $client_secret = isset($settings['client_secret']) ? $settings['client_secret'] : '';
-            
-            if (!empty($client_id) && !empty($client_secret)) {
-                // Success message
-                echo '<div class="success">Authentication Successful!</div>';
-                echo '<div class="loading"></div>';
-                echo '<p>Processing your authentication...</p>';
-                
-                // For demonstration purposes, we'll save a dummy connection
-                // In a real implementation, you would exchange the code for tokens,
-                // then use those tokens to get the user's analytics properties
-                $connection = array(
-                    'property_id' => 'UA-123456789-1',
-                    'property_name' => 'Example Website',
-                    'measurement_id' => '',
-                    'auth_code' => $auth_code,
-                    'timestamp' => time()
-                );
-                
-                update_option('uipress_analytics_bridge_connection', $connection);
-                
-                // Now, update UIPress settings if available
-                if (class_exists('UipressLite\Classes\App\UipOptions')) {
-                    $ga_data = array(
-                        'view' => $connection['property_id'],
-                        'code' => 'bridge_connection',
-                        'token' => 'bridge_token'
-                    );
-                    
-                    \UipressLite\Classes\App\UipOptions::update('google_analytics', $ga_data);
-                    
-                    echo '<p>UIPress settings updated successfully.</p>';
-                }
-                
-                echo '<p>This window will close automatically in 3 seconds...</p>';
-                echo '<script>setTimeout(function() { window.close(); }, 3000);</script>';
-            } else {
-                // Error message for missing API credentials
-                echo '<div class="error">Error: Missing API Credentials</div>';
-                echo '<p>Please enter your Google API credentials in the plugin settings.</p>';
-                echo '<p><button onclick="window.close();">Close</button></p>';
-            }
-        } else {
-            // Error message for missing code
-            echo '<div class="error">Error: Authentication Failed</div>';
-            echo '<p>No authorization code received from Google.</p>';
-            echo '<p><button onclick="window.close();">Close</button></p>';
+    // Check if we got a code
+    if (isset($_GET['code']) && !empty($_GET['code'])) {
+        $auth_code = $_GET['code'];
+        
+        // Get settings for API credentials
+        $settings = get_option('uipress_analytics_bridge_settings', array());
+        $client_id = isset($settings['client_id']) ? $settings['client_id'] : '';
+        $client_secret = isset($settings['client_secret']) ? $settings['client_secret'] : '';
+        
+        if (empty($client_id) || empty($client_secret)) {
+            wp_die('Error: Missing API credentials. Please configure your Google API settings.');
         }
-        ?>
-    </body>
-    </html>
-    <?php
+        
+        // Exchange auth code for tokens
+        $redirect_uri = admin_url('admin-ajax.php?action=uipress_analytics_bridge_oauth_callback');
+        
+        $response = wp_remote_post('https://oauth2.googleapis.com/token', array(
+            'body' => array(
+                'code' => $auth_code,
+                'client_id' => $client_id,
+                'client_secret' => $client_secret,
+                'redirect_uri' => $redirect_uri,
+                'grant_type' => 'authorization_code'
+            )
+        ));
+        
+        if (is_wp_error($response)) {
+            wp_die('Error exchanging authorization code: ' . $response->get_error_message());
+        }
+        
+        $tokens = json_decode(wp_remote_retrieve_body($response), true);
+        
+        if (!isset($tokens['access_token'])) {
+            wp_die('Error: Failed to receive access token from Google.');
+        }
+        
+        // Store tokens temporarily
+        update_option('uipress_analytics_bridge_temp_tokens', array(
+            'access_token' => $tokens['access_token'],
+            'refresh_token' => isset($tokens['refresh_token']) ? $tokens['refresh_token'] : '',
+            'expires' => time() + $tokens['expires_in']
+        ));
+        
+        // Redirect to property selection page
+        wp_redirect(admin_url('options-general.php?page=uipress-analytics-bridge&tab=select-property'));
+        exit;
+    } else {
+        wp_die('Error: No authorization code received from Google.');
+    }
+}
+
+/**
+ * Get Google Analytics properties for an account
+ */
+function uipress_analytics_bridge_get_properties() {
+    check_ajax_referer('uipress-analytics-bridge-admin-nonce', 'security');
+    
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(array('message' => __('You do not have sufficient permissions.', 'uipress-analytics-bridge')));
+        return;
+    }
+    
+    $account_id = isset($_POST['account_id']) ? sanitize_text_field($_POST['account_id']) : '';
+    
+    if (empty($account_id)) {
+        wp_send_json_error(array('message' => __('No account ID provided.', 'uipress-analytics-bridge')));
+        return;
+    }
+    
+    // Get tokens
+    $tokens = get_option('uipress_analytics_bridge_temp_tokens', array());
+    
+    if (empty($tokens) || empty($tokens['access_token'])) {
+        wp_send_json_error(array('message' => __('No authentication data found.', 'uipress-analytics-bridge')));
+        return;
+    }
+    
+    // Fetch properties for the account
+    $response = wp_remote_get('https://www.googleapis.com/analytics/v3/management/accounts/' . $account_id . '/webproperties', array(
+        'headers' => array(
+            'Authorization' => 'Bearer ' . $tokens['access_token']
+        )
+    ));
+    
+    if (is_wp_error($response)) {
+        wp_send_json_error(array('message' => $response->get_error_message()));
+        return;
+    }
+    
+    $data = json_decode(wp_remote_retrieve_body($response), true);
+    
+    if (isset($data['error'])) {
+        wp_send_json_error(array('message' => $data['error']['message']));
+        return;
+    }
+    
+    $properties = array();
+    
+    if (isset($data['items']) && is_array($data['items'])) {
+        foreach ($data['items'] as $item) {
+            // Determine if this is GA4 or Universal Analytics
+            $is_ga4 = (isset($item['id']) && strpos($item['id'], 'G-') === 0);
+            
+            $properties[] = array(
+                'id' => $item['id'],
+                'name' => $item['name'], // Just the name without type
+                'type' => $is_ga4 ? 'GA4' : 'UA',
+                'measurement_id' => $is_ga4 ? $item['id'] : ''
+            );
+        }
+    }
+    
+    wp_send_json_success(array('properties' => $properties));
+}
+
+/**
+ * Save selected Google Analytics property
+ */
+function uipress_analytics_bridge_save_selected_property() {
+    check_ajax_referer('uipress-analytics-bridge-admin-nonce', 'security');
+    
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(array('message' => __('You do not have sufficient permissions.', 'uipress-analytics-bridge')));
+        return;
+    }
+    
+    $property_id = isset($_POST['ga_property']) ? sanitize_text_field($_POST['ga_property']) : '';
+    $scope = isset($_POST['scope']) ? sanitize_text_field($_POST['scope']) : 'global';
+    
+    if (empty($property_id)) {
+        wp_send_json_error(array('message' => __('No property selected.', 'uipress-analytics-bridge')));
+        return;
+    }
+    
+    // Get tokens
+    $tokens = get_option('uipress_analytics_bridge_temp_tokens', array());
+    
+    if (empty($tokens) || empty($tokens['access_token'])) {
+        wp_send_json_error(array('message' => __('No authentication data found.', 'uipress-analytics-bridge')));
+        return;
+    }
+    
+    // Get property details from API to ensure accuracy
+    $access_token = $tokens['access_token'];
+    
+    // Find the account ID from the form submission
+    $account_id = isset($_POST['ga_account']) ? sanitize_text_field($_POST['ga_account']) : '';
+    
+    if (empty($account_id)) {
+        wp_send_json_error(array('message' => __('No account selected.', 'uipress-analytics-bridge')));
+        return;
+    }
+    
+    // Fetch properties for the account to get details for the selected property
+    $response = wp_remote_get('https://www.googleapis.com/analytics/v3/management/accounts/' . $account_id . '/webproperties', array(
+        'headers' => array(
+            'Authorization' => 'Bearer ' . $access_token
+        )
+    ));
+    
+    if (is_wp_error($response)) {
+        wp_send_json_error(array('message' => $response->get_error_message()));
+        return;
+    }
+    
+    $data = json_decode(wp_remote_retrieve_body($response), true);
+    
+    // Find the selected property in the response
+    $selected_property = null;
+    if (isset($data['items']) && is_array($data['items'])) {
+        foreach ($data['items'] as $item) {
+            if ($item['id'] === $property_id) {
+                $selected_property = $item;
+                break;
+            }
+        }
+    }
+    
+    if ($selected_property === null) {
+        wp_send_json_error(array('message' => __('Selected property not found in account.', 'uipress-analytics-bridge')));
+        return;
+    }
+    
+    // Determine if this is GA4 or Universal Analytics
+    $is_ga4 = (strpos($property_id, 'G-') === 0);
+    
+    // Save connection data
+    $connection = array(
+        'property_id' => $property_id,
+        'property_name' => $selected_property['name'],
+        'property_type' => $is_ga4 ? 'GA4' : 'Universal Analytics',
+        'scope' => $scope,
+        'access_token' => $tokens['access_token'],
+        'refresh_token' => isset($tokens['refresh_token']) ? $tokens['refresh_token'] : '',
+        'expires' => isset($tokens['expires']) ? $tokens['expires'] : 0,
+        'timestamp' => time()
+    );
+    
+    // Add measurement ID for GA4
+    if ($is_ga4) {
+        $connection['measurement_id'] = $property_id;
+    }
+    
+    update_option('uipress_analytics_bridge_connection', $connection);
+    
+    // Update UIPress settings
+    uipress_analytics_bridge_update_uipress_settings($connection);
+    
+    // Clean up temporary tokens
+    delete_option('uipress_analytics_bridge_temp_tokens');
+    
+    // Redirect to connection tab with success message
+    wp_redirect(admin_url('options-general.php?page=uipress-analytics-bridge&tab=connection&connected=1'));
     exit;
+}
+
+/**
+ * Update UIPress settings with connection data
+ * 
+ * @param array $connection The connection data
+ */
+function uipress_analytics_bridge_update_uipress_settings($connection) {
+    // Only proceed if UIPress is active
+    if (!defined('uip_plugin_version') || !defined('uip_pro_plugin_version')) {
+        return;
+    }
+    
+    // Prepare Google Analytics data in UIPress format
+    $ga_data = array(
+        'view' => $connection['property_id'],
+        'code' => 'bridge_code',
+        'token' => $connection['access_token']
+    );
+    
+    // Add measurement ID for GA4
+    if (isset($connection['measurement_id']) && !empty($connection['measurement_id'])) {
+        $ga_data['measurement_id'] = $connection['measurement_id'];
+        $ga_data['gafour'] = true;
+    }
+    
+    // Update based on scope
+    if ($connection['scope'] === 'user') {
+        // User preferences
+        if (class_exists('UipressLite\Classes\App\UserPreferences')) {
+            \UipressLite\Classes\App\UserPreferences::update('google_analytics', $ga_data);
+        } else {
+            // Fallback
+            $user_id = get_current_user_id();
+            $prefs = get_user_meta($user_id, 'uip-prefs', true);
+            if (!is_array($prefs)) {
+                $prefs = array();
+            }
+            $prefs['google_analytics'] = $ga_data;
+            update_user_meta($user_id, 'uip-prefs', $prefs);
+        }
+    } else {
+        // Global options
+        if (class_exists('UipressLite\Classes\App\UipOptions')) {
+            \UipressLite\Classes\App\UipOptions::update('google_analytics', $ga_data);
+        } else {
+            // Fallback
+            $options = get_option('uip-global-settings', array());
+            if (!is_array($options)) {
+                $options = array();
+            }
+            $options['google_analytics'] = $ga_data;
+            update_option('uip-global-settings', $options);
+        }
+    }
 }
 
 /**

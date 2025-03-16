@@ -680,6 +680,7 @@ class UIPress_Analytics_Bridge_Admin {
             
             <h2 class="nav-tab-wrapper">
                 <a href="?page=uipress-analytics-bridge&tab=connection" class="nav-tab <?php echo $active_tab === 'connection' ? 'nav-tab-active' : ''; ?>"><?php _e('Connection', 'uipress-analytics-bridge'); ?></a>
+                <a href="?page=uipress-analytics-bridge&tab=select-property" class="nav-tab <?php echo $active_tab === 'select-property' ? 'nav-tab-active' : ''; ?>"><?php _e('Select Property', 'uipress-analytics-bridge'); ?></a>
                 <a href="?page=uipress-analytics-bridge&tab=general" class="nav-tab <?php echo $active_tab === 'general' ? 'nav-tab-active' : ''; ?>"><?php _e('API Settings', 'uipress-analytics-bridge'); ?></a>
                 <a href="?page=uipress-analytics-bridge&tab=advanced" class="nav-tab <?php echo $active_tab === 'advanced' ? 'nav-tab-active' : ''; ?>"><?php _e('Advanced', 'uipress-analytics-bridge'); ?></a>
             </h2>
@@ -757,6 +758,8 @@ class UIPress_Analytics_Bridge_Admin {
                         <?php
                     }
                     ?>
+                <?php elseif ($active_tab === 'select-property') : ?>
+                    <?php $this->display_property_selection(); ?>
                 <?php elseif ($active_tab === 'general') : ?>
                     <form method="post" action="options.php">
                         <?php
@@ -779,6 +782,183 @@ class UIPress_Analytics_Bridge_Admin {
             </div>
         </div>
         <?php
+    }
+
+    /**
+     * Display property selection interface
+     */
+    public function display_property_selection() {
+        // Check if we have temporary tokens
+        $tokens = get_option('uipress_analytics_bridge_temp_tokens', array());
+        
+        if (empty($tokens) || empty($tokens['access_token'])) {
+            ?>
+            <div class="notice notice-error">
+                <p><?php _e('No authentication data found. Please connect to Google Analytics again.', 'uipress-analytics-bridge'); ?></p>
+            </div>
+            <p><a href="?page=uipress-analytics-bridge&tab=connection" class="button button-primary"><?php _e('Connect Google Analytics', 'uipress-analytics-bridge'); ?></a></p>
+            <?php
+            return;
+        }
+        
+        // Get Google Analytics accounts
+        $accounts = $this->get_google_analytics_accounts($tokens['access_token']);
+        
+        if (empty($accounts) || isset($accounts['error'])) {
+            ?>
+            <div class="notice notice-error">
+                <p><?php _e('Error fetching Google Analytics accounts:', 'uipress-analytics-bridge'); ?> 
+                <?php echo isset($accounts['error']) ? esc_html($accounts['error']) : __('No accounts found', 'uipress-analytics-bridge'); ?></p>
+            </div>
+            <?php
+            return;
+        }
+        
+        // Display account and property selection form
+        ?>
+        <form method="post" action="<?php echo esc_url(admin_url('admin-ajax.php')); ?>">
+            <input type="hidden" name="action" value="uipress_analytics_bridge_save_selected_property">
+            <?php wp_nonce_field('uipress-analytics-bridge-admin-nonce', 'security'); ?>
+            
+            <table class="form-table">
+                <tr>
+                    <th scope="row"><?php _e('Google Analytics Account', 'uipress-analytics-bridge'); ?></th>
+                    <td>
+                        <select id="ga-account" name="ga_account" required>
+                            <option value=""><?php _e('-- Select Account --', 'uipress-analytics-bridge'); ?></option>
+                            <?php foreach ($accounts as $account) : ?>
+                                <option value="<?php echo esc_attr($account['id']); ?>"><?php echo esc_html($account['name']); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php _e('Google Analytics Property', 'uipress-analytics-bridge'); ?></th>
+                    <td>
+                        <select id="ga-property" name="ga_property" required disabled>
+                            <option value=""><?php _e('-- Select Account First --', 'uipress-analytics-bridge'); ?></option>
+                        </select>
+                        <p class="description"><?php _e('Properties will load after selecting an account.', 'uipress-analytics-bridge'); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php _e('Connection Scope', 'uipress-analytics-bridge'); ?></th>
+                    <td>
+                        <label>
+                            <input type="radio" name="scope" value="global" checked>
+                            <?php _e('Global (all users)', 'uipress-analytics-bridge'); ?>
+                        </label>
+                        <br>
+                        <label>
+                            <input type="radio" name="scope" value="user">
+                            <?php _e('User-specific (current user only)', 'uipress-analytics-bridge'); ?>
+                        </label>
+                    </td>
+                </tr>
+            </table>
+            
+            <p class="submit">
+                <input type="submit" class="button button-primary" value="<?php _e('Save Property', 'uipress-analytics-bridge'); ?>">
+                <a href="?page=uipress-analytics-bridge&tab=connection" class="button button-secondary"><?php _e('Cancel', 'uipress-analytics-bridge'); ?></a>
+            </p>
+        </form>
+        
+        <script>
+        jQuery(document).ready(function($) {
+            $('#ga-account').on('change', function() {
+                var accountId = $(this).val();
+                
+                if (accountId) {
+                    // Enable and show loading state for property dropdown
+                    $('#ga-property').prop('disabled', true)
+                        .html('<option value=""><?php _e('Loading properties...', 'uipress-analytics-bridge'); ?></option>');
+                    
+                    // Fetch properties for the selected account
+                    $.ajax({
+                        url: ajaxurl,
+                        type: 'POST',
+                        data: {
+                            action: 'uipress_analytics_bridge_get_properties',
+                            security: '<?php echo wp_create_nonce('uipress-analytics-bridge-admin-nonce'); ?>',
+                            account_id: accountId
+                        },
+                        success: function(response) {
+                            $('#ga-property').prop('disabled', false);
+                            
+                            if (response.success && response.data.properties.length > 0) {
+                                var options = '<option value=""><?php _e('-- Select Property --', 'uipress-analytics-bridge'); ?></option>';
+                                
+                                $.each(response.data.properties, function(i, property) {
+                                    // Safely handle missing data with empty string fallbacks
+                                    var propertyId = property.id || '';
+                                    var propertyName = property.name || 'Unknown Property';
+                                    var propertyType = property.type || '';
+                                    var measurementId = property.measurement_id || '';
+                                    
+                                    // Create option with all necessary data attributes
+                                    options += '<option value="' + propertyId + '" ' + 
+                                              'data-type="' + propertyType + '" ' + 
+                                              'data-name="' + propertyName.replace(/"/g, '&quot;') + '" ' + 
+                                              'data-measurement-id="' + measurementId + '">' + 
+                                              propertyName + (propertyType ? ' (' + propertyType + ')' : '') + '</option>';
+                                });
+                                
+                                $('#ga-property').html(options);
+                            } else {
+                                $('#ga-property').html('<option value=""><?php _e('No properties found', 'uipress-analytics-bridge'); ?></option>');
+                            }
+                        },
+                        error: function() {
+                            $('#ga-property').prop('disabled', false)
+                                .html('<option value=""><?php _e('Error loading properties', 'uipress-analytics-bridge'); ?></option>');
+                        }
+                    });
+                } else {
+                    // Reset property dropdown
+                    $('#ga-property').prop('disabled', true)
+                        .html('<option value=""><?php _e('-- Select Account First --', 'uipress-analytics-bridge'); ?></option>');
+                }
+            });
+        });
+        </script>
+        <?php
+    }
+
+    /**
+     * Get Google Analytics accounts
+     * 
+     * @param string $access_token The access token
+     * @return array The accounts list
+     */
+    private function get_google_analytics_accounts($access_token) {
+        $response = wp_remote_get('https://www.googleapis.com/analytics/v3/management/accounts', array(
+            'headers' => array(
+                'Authorization' => 'Bearer ' . $access_token
+            )
+        ));
+        
+        if (is_wp_error($response)) {
+            return array('error' => $response->get_error_message());
+        }
+        
+        $data = json_decode(wp_remote_retrieve_body($response), true);
+        
+        if (isset($data['error'])) {
+            return array('error' => $data['error']['message']);
+        }
+        
+        $accounts = array();
+        
+        if (isset($data['items']) && is_array($data['items'])) {
+            foreach ($data['items'] as $item) {
+                $accounts[] = array(
+                    'id' => $item['id'],
+                    'name' => $item['name']
+                );
+            }
+        }
+        
+        return $accounts;
     }
 
     /**

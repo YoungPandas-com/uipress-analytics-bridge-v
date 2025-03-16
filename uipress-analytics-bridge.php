@@ -34,7 +34,6 @@ define('UIPRESS_ANALYTICS_BRIDGE_PLUGIN_BASENAME', plugin_basename(__FILE__));
 
 // Include the admin class
 require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'admin/class-uipress-analytics-bridge-admin.php';
-require_once plugin_dir_path(__FILE__) . 'simple-admin.php';
 
 /**
  * Direct registration of admin page - guaranteed to work

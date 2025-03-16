@@ -1,0 +1,17 @@
+uipress-analytics-bridge/
+├── uipress-analytics-bridge.php        (Main plugin file)
+├── includes/
+│   ├── class-uipress-analytics-bridge.php           (Core plugin class)
+│   ├── class-uipress-analytics-bridge-loader.php    (Hook loader)
+│   ├── class-uipress-analytics-bridge-detector.php  (UIPress detector)
+│   ├── class-uipress-analytics-bridge-auth.php      (WordPress auth handling)
+│   ├── class-uipress-analytics-bridge-data.php      (Data formatting)
+│   └── api/
+│       ├── class-uipress-analytics-bridge-api-auth.php  (Google API auth)
+│       └── class-uipress-analytics-bridge-api-data.php  (Google API data retrieval)
+└── admin/
+    ├── class-uipress-analytics-bridge-admin.php     (Admin interface)
+    ├── js/
+    │   └── uipress-analytics-bridge-admin.js        (Admin JS)
+    └── css/
+        └── uipress-analytics-bridge-admin.css       (Admin CSS)

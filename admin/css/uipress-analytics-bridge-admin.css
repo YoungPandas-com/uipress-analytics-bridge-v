@@ -1,0 +1,232 @@
+/**
+ * Admin Styles for UIPress Analytics Bridge
+ */
+
+/* Main container styles */
+.uipress-analytics-bridge-header {
+    margin: 20px 0;
+    padding: 15px;
+    background-color: #fff;
+    border-left: 4px solid #0c5cef;
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+}
+
+/* Tab navigation */
+.uipress-analytics-bridge-tabs {
+    margin-top: 20px;
+    background: #fff;
+    border: 1px solid #e2e4e7;
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+}
+
+.uipress-analytics-bridge-tab-nav {
+    display: flex;
+    border-bottom: 1px solid #e2e4e7;
+    background: #f8f9fa;
+}
+
+.uipress-analytics-bridge-tab-nav a {
+    padding: 12px 15px;
+    text-decoration: none;
+    color: #555;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+}
+
+.uipress-analytics-bridge-tab-nav a:hover {
+    color: #0c5cef;
+}
+
+.uipress-analytics-bridge-tab-nav a.active {
+    border-bottom: 2px solid #0c5cef;
+    color: #0c5cef;
+    background: #fff;
+}
+
+/* Tab content */
+.uipress-analytics-bridge-tab-content {
+    padding: 20px;
+}
+
+.uipress-analytics-bridge-tab-pane {
+    display: none;
+}
+
+.uipress-analytics-bridge-tab-pane.active {
+    display: block;
+}
+
+/* Authentication section */
+.uipress-analytics-bridge-auth-status {
+    margin-bottom: 20px;
+    padding: 15px;
+    background: #f8f9fa;
+    border: 1px solid #e2e4e7;
+    border-radius: 4px;
+}
+
+.uipress-analytics-bridge-auth-actions {
+    margin-top: 15px;
+}
+
+.uipress-analytics-bridge-auth-actions button {
+    margin-right: 10px;
+}
+
+.uipress-analytics-bridge-status-connected {
+    padding: 10px;
+    background: #f0f9eb;
+    border-left: 4px solid #67c23a;
+    margin-bottom: 15px;
+}
+
+.uipress-analytics-bridge-status-disconnected {
+    padding: 10px;
+    background: #fef0f0;
+    border-left: 4px solid #f56c6c;
+    margin-bottom: 15px;
+}
+
+.uipress-analytics-bridge-properties {
+    margin-top: 20px;
+}
+
+/* Diagnostic section */
+.uipress-analytics-bridge-diagnostic {
+    margin-top: 20px;
+}
+
+.uipress-analytics-bridge-diagnostic h3 {
+    margin-top: 25px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid #e2e4e7;
+}
+
+.uipress-analytics-bridge-diagnostic table {
+    margin-top: 10px;
+}
+
+/* Help section */
+.uipress-analytics-bridge-help {
+    margin-top: 20px;
+}
+
+.uipress-analytics-bridge-help h3 {
+    margin-top: 25px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid #e2e4e7;
+}
+
+.uipress-analytics-bridge-help h4 {
+    margin-top: 20px;
+    margin-bottom: 10px;
+}
+
+.uipress-analytics-bridge-help ul,
+.uipress-analytics-bridge-help ol {
+    margin-left: 20px;
+}
+
+.uipress-analytics-bridge-help li {
+    margin-bottom: 10px;
+}
+
+/* Message styles */
+.uipress-analytics-bridge-message {
+    margin: 15px 0;
+    padding: 1px 12px;
+    border-left: 4px solid #0c5cef;
+    box-shadow: 0 1px 1px rgba(0,0,0,.04);
+    background: #fff;
+}
+
+.uipress-analytics-bridge-message p {
+    margin: 0.5em 0;
+    padding: 2px;
+}
+
+.uipress-analytics-bridge-message-info {
+    border-left-color: #0c5cef;
+}
+
+.uipress-analytics-bridge-message-success {
+    border-left-color: #46b450;
+}
+
+.uipress-analytics-bridge-message-error {
+    border-left-color: #dc3232;
+}
+
+/* Form styling to match UIPress */
+input[type="text"], 
+input[type="password"], 
+input[type="number"] {
+    border-radius: 4px;
+    border: 1px solid #dcdcde;
+}
+
+input[type="text"]:focus, 
+input[type="password"]:focus, 
+input[type="number"]:focus {
+    border-color: #0c5cef;
+    box-shadow: 0 0 0 1px #0c5cef;
+    outline: 2px solid transparent;
+}
+
+.button.button-primary {
+    background: #0c5cef;
+    border-color: #0c5cef;
+}
+
+.button.button-primary:hover,
+.button.button-primary:focus {
+    background: #0a4fd0;
+    border-color: #0a4fd0;
+}
+
+/* Tables */
+.widefat {
+    border-collapse: collapse;
+    width: 100%;
+    margin-top: 15px;
+    margin-bottom: 15px;
+}
+
+.widefat th {
+    text-align: left;
+    padding: 8px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e2e4e7;
+}
+
+.widefat td {
+    padding: 8px;
+    border-bottom: 1px solid #f0f0f1;
+}
+
+.widefat tr:last-child td {
+    border-bottom: none;
+}
+
+.widefat tr:hover td {
+    background: #f8f9fa;
+}
+
+/* Responsive adjustments */
+@media screen and (max-width: 782px) {
+    .uipress-analytics-bridge-tab-nav {
+        flex-direction: column;
+    }
+    
+    .uipress-analytics-bridge-tab-nav a {
+        border-left: 2px solid transparent;
+        border-bottom: none;
+        padding: 10px;
+    }
+    
+    .uipress-analytics-bridge-tab-nav a.active {
+        border-left: 2px solid #0c5cef;
+        border-bottom: none;
+    }
+}

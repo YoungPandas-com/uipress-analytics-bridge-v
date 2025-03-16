@@ -51,6 +51,11 @@ class UIPress_Analytics_Bridge_Admin {
         
         // Add settings link to plugins page
         add_filter('plugin_action_links_' . UIPRESS_ANALYTICS_BRIDGE_PLUGIN_BASENAME, array($this, 'add_action_links'));
+        
+        // Add AJAX handlers for Google Analytics connections
+        add_action('wp_ajax_uipress_analytics_bridge_connect', array($this, 'connect_to_google_analytics'));
+        add_action('wp_ajax_uipress_analytics_bridge_get_properties', array($this, 'get_analytics_properties'));
+        add_action('wp_ajax_uipress_analytics_bridge_save_property', array($this, 'save_analytics_property'));
     }
 
     /**
@@ -150,7 +155,20 @@ class UIPress_Analytics_Bridge_Admin {
             array($this, 'validate_advanced_settings')
         );
         
+        register_setting(
+            'uipress_analytics_bridge_connection',
+            'uipress_analytics_bridge_connection',
+            array($this, 'validate_connection_settings')
+        );
+        
         // Add settings sections
+        add_settings_section(
+            'uipress_analytics_bridge_connection_section',
+            __('Google Analytics Connection', 'uipress-analytics-bridge'),
+            array($this, 'connection_section_callback'),
+            'uipress_analytics_bridge_connection'
+        );
+        
         add_settings_section(
             'uipress_analytics_bridge_main',
             __('Google API Settings', 'uipress-analytics-bridge'),
@@ -170,6 +188,23 @@ class UIPress_Analytics_Bridge_Admin {
             __('Advanced Settings', 'uipress-analytics-bridge'),
             array($this, 'advanced_section_callback'),
             'uipress_analytics_bridge_advanced'
+        );
+        
+        // Add connection fields
+        add_settings_field(
+            'analytics_property',
+            __('Google Analytics Property', 'uipress-analytics-bridge'),
+            array($this, 'analytics_property_callback'),
+            'uipress_analytics_bridge_connection',
+            'uipress_analytics_bridge_connection_section'
+        );
+        
+        add_settings_field(
+            'connection_scope',
+            __('Connection Scope', 'uipress-analytics-bridge'),
+            array($this, 'connection_scope_callback'),
+            'uipress_analytics_bridge_connection',
+            'uipress_analytics_bridge_connection_section'
         );
         
         // Add settings fields
@@ -293,6 +328,83 @@ class UIPress_Analytics_Bridge_Admin {
     }
 
     /**
+     * Validate connection settings.
+     *
+     * @since    1.0.0
+     * @param    array    $input    The input to validate.
+     * @return   array              The validated input.
+     */
+    public function validate_connection_settings($input) {
+        $validated = array();
+        
+        // Validate property ID
+        if (isset($input['property_id'])) {
+            $validated['property_id'] = sanitize_text_field($input['property_id']);
+        }
+        
+        // Validate property name
+        if (isset($input['property_name'])) {
+            $validated['property_name'] = sanitize_text_field($input['property_name']);
+        }
+        
+        // Validate measurement ID (for GA4)
+        if (isset($input['measurement_id'])) {
+            $validated['measurement_id'] = sanitize_text_field($input['measurement_id']);
+        }
+        
+        // Validate account scope
+        if (isset($input['scope'])) {
+            $validated['scope'] = ($input['scope'] === 'user') ? 'user' : 'global';
+        } else {
+            $validated['scope'] = 'global';
+        }
+        
+        // Store in UIPress format if UIPress is active
+        if (defined('uip_plugin_version') && defined('uip_pro_plugin_version')) {
+            $this->update_uipress_settings($validated);
+        }
+        
+        return $validated;
+    }
+
+    /**
+     * Connection section callback.
+     *
+     * @since    1.0.0
+     * @param    array    $args    The section arguments.
+     */
+    public function connection_section_callback($args) {
+        $settings = get_option('uipress_analytics_bridge_settings');
+        $connection = get_option('uipress_analytics_bridge_connection');
+        
+        // Check if API credentials are set
+        if (empty($settings['client_id']) || empty($settings['client_secret'])) {
+            ?>
+            <div class="notice notice-warning inline">
+                <p><?php _e('You need to configure your Google API credentials before connecting to Google Analytics.', 'uipress-analytics-bridge'); ?></p>
+                <p><a href="?page=uipress-analytics-bridge&tab=general" class="button button-primary"><?php _e('Configure API Credentials', 'uipress-analytics-bridge'); ?></a></p>
+            </div>
+            <?php
+            return;
+        }
+        
+        // Check if already connected
+        if (!empty($connection['property_id']) && !empty($connection['property_name'])) {
+            $property_type = isset($connection['measurement_id']) ? 'GA4' : 'Universal Analytics';
+            ?>
+            <div class="notice notice-success inline">
+                <p><?php printf(__('Connected to %1$s (%2$s)', 'uipress-analytics-bridge'), esc_html($connection['property_name']), esc_html($property_type)); ?></p>
+            </div>
+            <p><?php _e('You can change your connected Google Analytics property using the options below.', 'uipress-analytics-bridge'); ?></p>
+            <?php
+        } else {
+            ?>
+            <p><?php _e('Connect your Google Analytics account to start bridging data to UIPress.', 'uipress-analytics-bridge'); ?></p>
+            <?php
+        }
+    }
+
+    /**
      * Settings section callback.
      *
      * @since    1.0.0
@@ -301,6 +413,12 @@ class UIPress_Analytics_Bridge_Admin {
     public function settings_section_callback($args) {
         ?>
         <p><?php _e('Enter your Google API credentials to enable the analytics integration. You can create these in the Google Cloud Console.', 'uipress-analytics-bridge'); ?></p>
+        <ol>
+            <li><?php _e('Go to the <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a> and create a new project', 'uipress-analytics-bridge'); ?></li>
+            <li><?php _e('Enable the Google Analytics API for your project', 'uipress-analytics-bridge'); ?></li>
+            <li><?php _e('Create OAuth 2.0 credentials (Client ID and Client Secret)', 'uipress-analytics-bridge'); ?></li>
+            <li><?php _e('Set the authorized redirect URI to:', 'uipress-analytics-bridge'); ?> <code><?php echo admin_url('admin-ajax.php?action=uipress_analytics_bridge_oauth_callback'); ?></code></li>
+        </ol>
         <p><a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="button button-secondary"><?php _e('Create Google API Credentials', 'uipress-analytics-bridge'); ?></a></p>
         <?php
     }
@@ -326,6 +444,87 @@ class UIPress_Analytics_Bridge_Admin {
     public function advanced_section_callback($args) {
         ?>
         <p><?php _e('Advanced settings for troubleshooting and special configurations.', 'uipress-analytics-bridge'); ?></p>
+        <?php
+    }
+
+    /**
+     * Analytics property field callback.
+     *
+     * @since    1.0.0
+     */
+    public function analytics_property_callback() {
+        $connection = get_option('uipress_analytics_bridge_connection', array());
+        $is_connected = (!empty($connection['property_id']) && !empty($connection['property_name']));
+        
+        // Get settings for API credentials check
+        $settings = get_option('uipress_analytics_bridge_settings', array());
+        $has_credentials = (!empty($settings['client_id']) && !empty($settings['client_secret']));
+        
+        if (!$has_credentials) {
+            ?>
+            <p class="description"><?php _e('Please configure your Google API credentials first.', 'uipress-analytics-bridge'); ?></p>
+            <?php
+            return;
+        }
+        
+        if ($is_connected) {
+            $property_type = isset($connection['measurement_id']) && !empty($connection['measurement_id']) ? 'GA4' : 'Universal Analytics';
+            $property_id = isset($connection['measurement_id']) && !empty($connection['measurement_id']) ? 
+                $connection['measurement_id'] : $connection['property_id'];
+            ?>
+            <div class="uipress-analytics-property-info">
+                <p><strong><?php _e('Connected Property:', 'uipress-analytics-bridge'); ?></strong> <?php echo esc_html($connection['property_name']); ?></p>
+                <p><strong><?php _e('Property ID:', 'uipress-analytics-bridge'); ?></strong> <?php echo esc_html($property_id); ?></p>
+                <p><strong><?php _e('Property Type:', 'uipress-analytics-bridge'); ?></strong> <?php echo esc_html($property_type); ?></p>
+                <button id="uipress-analytics-change-property" class="button button-secondary"><?php _e('Change Property', 'uipress-analytics-bridge'); ?></button>
+                <button id="uipress-analytics-disconnect" class="button button-secondary"><?php _e('Disconnect', 'uipress-analytics-bridge'); ?></button>
+            </div>
+            <div id="uipress-analytics-property-selection" style="display: none; margin-top: 15px;">
+                <p><?php _e('Select a different Google Analytics property:', 'uipress-analytics-bridge'); ?></p>
+                <select id="uipress-analytics-property-select" style="min-width: 300px;">
+                    <option value=""><?php _e('-- Select Property --', 'uipress-analytics-bridge'); ?></option>
+                </select>
+                <button id="uipress-analytics-save-property" class="button button-primary"><?php _e('Save Property', 'uipress-analytics-bridge'); ?></button>
+                <button id="uipress-analytics-cancel" class="button button-secondary"><?php _e('Cancel', 'uipress-analytics-bridge'); ?></button>
+                <p class="description"><?php _e('Note: Changing properties will update both global and user-specific settings.', 'uipress-analytics-bridge'); ?></p>
+            </div>
+            <?php
+        } else {
+            ?>
+            <button id="uipress-analytics-connect" class="button button-primary"><?php _e('Connect Google Analytics', 'uipress-analytics-bridge'); ?></button>
+            <p class="description"><?php _e('Click to authorize and select a Google Analytics property.', 'uipress-analytics-bridge'); ?></p>
+            <div id="uipress-analytics-property-selection" style="display: none; margin-top: 15px;">
+                <p><?php _e('Select a Google Analytics property:', 'uipress-analytics-bridge'); ?></p>
+                <select id="uipress-analytics-property-select" style="min-width: 300px;">
+                    <option value=""><?php _e('-- Select Property --', 'uipress-analytics-bridge'); ?></option>
+                </select>
+                <button id="uipress-analytics-save-property" class="button button-primary"><?php _e('Save Property', 'uipress-analytics-bridge'); ?></button>
+                <p class="description"><?php _e('Select the property you want to connect to UIPress.', 'uipress-analytics-bridge'); ?></p>
+            </div>
+            <?php
+        }
+    }
+
+    /**
+     * Connection scope field callback.
+     *
+     * @since    1.0.0
+     */
+    public function connection_scope_callback() {
+        $connection = get_option('uipress_analytics_bridge_connection', array());
+        $scope = isset($connection['scope']) ? $connection['scope'] : 'global';
+        
+        ?>
+        <label>
+            <input type="radio" name="uipress_analytics_bridge_connection[scope]" value="global" <?php checked($scope, 'global'); ?>>
+            <?php _e('Global (all users)', 'uipress-analytics-bridge'); ?>
+        </label>
+        <br>
+        <label>
+            <input type="radio" name="uipress_analytics_bridge_connection[scope]" value="user" <?php checked($scope, 'user'); ?>>
+            <?php _e('User-specific (current user only)', 'uipress-analytics-bridge'); ?>
+        </label>
+        <p class="description"><?php _e('Determines whether this connection applies to all users or just to your account.', 'uipress-analytics-bridge'); ?></p>
         <?php
     }
 
@@ -450,7 +649,7 @@ class UIPress_Analytics_Bridge_Admin {
         }
         
         // Get active tab
-        $active_tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'general';
+        $active_tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'connection';
         
         // Check for saved settings notice
         $settings_updated = isset($_GET['settings-updated']) ? true : false;
@@ -480,13 +679,85 @@ class UIPress_Analytics_Bridge_Admin {
             ?>
             
             <h2 class="nav-tab-wrapper">
-                <a href="?page=uipress-analytics-bridge&tab=general" class="nav-tab <?php echo $active_tab === 'general' ? 'nav-tab-active' : ''; ?>"><?php _e('General Settings', 'uipress-analytics-bridge'); ?></a>
-                <a href="?page=uipress-analytics-bridge&tab=advanced" class="nav-tab <?php echo $active_tab === 'advanced' ? 'nav-tab-active' : ''; ?>"><?php _e('Advanced Settings', 'uipress-analytics-bridge'); ?></a>
-                <a href="?page=uipress-analytics-bridge&tab=status" class="nav-tab <?php echo $active_tab === 'status' ? 'nav-tab-active' : ''; ?>"><?php _e('Status', 'uipress-analytics-bridge'); ?></a>
+                <a href="?page=uipress-analytics-bridge&tab=connection" class="nav-tab <?php echo $active_tab === 'connection' ? 'nav-tab-active' : ''; ?>"><?php _e('Connection', 'uipress-analytics-bridge'); ?></a>
+                <a href="?page=uipress-analytics-bridge&tab=general" class="nav-tab <?php echo $active_tab === 'general' ? 'nav-tab-active' : ''; ?>"><?php _e('API Settings', 'uipress-analytics-bridge'); ?></a>
+                <a href="?page=uipress-analytics-bridge&tab=advanced" class="nav-tab <?php echo $active_tab === 'advanced' ? 'nav-tab-active' : ''; ?>"><?php _e('Advanced', 'uipress-analytics-bridge'); ?></a>
             </h2>
             
             <div class="uipress-analytics-bridge-content">
-                <?php if ($active_tab === 'general') : ?>
+                <?php if ($active_tab === 'connection') : ?>
+                    <?php
+                    // Direct Connection Form
+                    // Check if we have API credentials
+                    $settings = get_option('uipress_analytics_bridge_settings', array());
+                    $client_id = isset($settings['client_id']) ? $settings['client_id'] : '';
+                    $client_secret = isset($settings['client_secret']) ? $settings['client_secret'] : '';
+
+                    // Get the redirect URI for our callback
+                    $redirect_uri = admin_url('admin-ajax.php') . '?action=uipress_analytics_bridge_oauth_callback';
+
+                    // Check if we already have a connection
+                    $connection = get_option('uipress_analytics_bridge_connection', array());
+                    $is_connected = !empty($connection['property_id']);
+
+                    if ($is_connected) {
+                        // Display connection info
+                        ?>
+                        <div class="uipress-connection-info" style="background: #f8f8f8; padding: 15px; border: 1px solid #ddd; margin: 20px 0;">
+                            <h3><?php _e('Connected to Google Analytics', 'uipress-analytics-bridge'); ?></h3>
+                            <p><strong><?php _e('Property:', 'uipress-analytics-bridge'); ?></strong> <?php echo esc_html($connection['property_name']); ?></p>
+                            <p><strong><?php _e('Property ID:', 'uipress-analytics-bridge'); ?></strong> <?php echo esc_html($connection['property_id']); ?></p>
+                            <?php if (!empty($connection['measurement_id'])): ?>
+                                <p><strong><?php _e('Measurement ID:', 'uipress-analytics-bridge'); ?></strong> <?php echo esc_html($connection['measurement_id']); ?></p>
+                            <?php endif; ?>
+                            
+                            <div class="uipress-connection-actions">
+                                <a href="<?php echo wp_nonce_url(admin_url('admin-ajax.php?action=uipress_analytics_bridge_disconnect'), 'uipress-analytics-bridge-admin-nonce', 'security'); ?>" class="button button-secondary"><?php _e('Disconnect', 'uipress-analytics-bridge'); ?></a>
+                            </div>
+                        </div>
+                        <?php
+                    } else {
+                        // Display connection form
+                        ?>
+                        <div class="uipress-connection-form" style="background: #f8f8f8; padding: 15px; border: 1px solid #ddd; margin: 20px 0;">
+                            <h3><?php _e('Connect to Google Analytics', 'uipress-analytics-bridge'); ?></h3>
+                            
+                            <?php if (empty($client_id) || empty($client_secret)): ?>
+                                <p class="notice notice-warning" style="padding: 10px;"><?php _e('Please enter your Google API credentials in the API Settings tab before connecting.', 'uipress-analytics-bridge'); ?></p>
+                            <?php else: ?>
+                                <p><?php _e('Click the button below to connect to your Google Analytics account.', 'uipress-analytics-bridge'); ?></p>
+                                
+                                <div class="uipress-connection-actions">
+                                    <!-- Direct connection link that will open the Google auth page -->
+                                    <?php
+                                    // Create a state parameter for security
+                                    $state = wp_create_nonce('uipress-analytics-bridge-oauth');
+                                    
+                                    // Build the auth URL directly
+                                    $auth_url = 'https://accounts.google.com/o/oauth2/auth' . 
+                                        '?client_id=' . urlencode($client_id) . 
+                                        '&redirect_uri=' . urlencode($redirect_uri) .
+                                        '&scope=' . urlencode('https://www.googleapis.com/auth/analytics.readonly') .
+                                        '&response_type=code' .
+                                        '&access_type=offline' .
+                                        '&state=' . urlencode($state) .
+                                        '&prompt=consent';
+                                    ?>
+                                    
+                                    <a href="<?php echo esc_url($auth_url); ?>" 
+                                       onclick="window.open(this.href, 'uipress_analytics_auth', 'width=600,height=700,top=100,left=100'); return false;" 
+                                       class="button button-primary">
+                                        <?php _e('Connect to Google Analytics', 'uipress-analytics-bridge'); ?>
+                                    </a>
+                                </div>
+                                
+                                <p class="description"><?php _e('This will open a popup window to authenticate with Google.', 'uipress-analytics-bridge'); ?></p>
+                            <?php endif; ?>
+                        </div>
+                        <?php
+                    }
+                    ?>
+                <?php elseif ($active_tab === 'general') : ?>
                     <form method="post" action="options.php">
                         <?php
                         settings_fields('uipress_analytics_bridge_settings');
@@ -504,59 +775,212 @@ class UIPress_Analytics_Bridge_Admin {
                         ?>
                     </form>
                 
-                <?php elseif ($active_tab === 'status') : ?>
-                    <div class="uipress-analytics-card">
-                        <h3><?php _e('System Status', 'uipress-analytics-bridge'); ?></h3>
-                        
-                        <table class="widefat" cellspacing="0">
-                            <tbody>
-                                <tr>
-                                    <th><?php _e('UIPress Lite Status:', 'uipress-analytics-bridge'); ?></th>
-                                    <td><?php echo defined('uip_plugin_version') ? '<span class="uipress-status-active">Active (' . esc_html(uip_plugin_version) . ')</span>' : '<span class="uipress-status-inactive">Inactive</span>'; ?></td>
-                                </tr>
-                                <tr>
-                                    <th><?php _e('UIPress Pro Status:', 'uipress-analytics-bridge'); ?></th>
-                                    <td><?php echo defined('uip_pro_plugin_version') ? '<span class="uipress-status-active">Active (' . esc_html(uip_pro_plugin_version) . ')</span>' : '<span class="uipress-status-inactive">Inactive</span>'; ?></td>
-                                </tr>
-                                <tr>
-                                    <th><?php _e('API Credentials:', 'uipress-analytics-bridge'); ?></th>
-                                    <td><?php echo !empty(get_option('uipress_analytics_bridge_settings')['client_id']) ? '<span class="uipress-status-active">Configured</span>' : '<span class="uipress-status-inactive">Not Configured</span>'; ?></td>
-                                </tr>
-                                <tr>
-                                    <th><?php _e('Debug Mode:', 'uipress-analytics-bridge'); ?></th>
-                                    <td><?php echo !empty(get_option('uipress_analytics_bridge_advanced')['debug_mode']) ? '<span class="uipress-status-warning">Enabled</span>' : '<span class="uipress-status-active">Disabled</span>'; ?></td>
-                                </tr>
-                                <tr>
-                                    <th><?php _e('PHP Version:', 'uipress-analytics-bridge'); ?></th>
-                                    <td>
-                                        <?php 
-                                        $php_version = phpversion();
-                                        $is_compatible = version_compare($php_version, '7.2', '>=');
-                                        echo $is_compatible ? 
-                                            '<span class="uipress-status-active">' . esc_html($php_version) . '</span>' : 
-                                            '<span class="uipress-status-inactive">' . esc_html($php_version) . ' (PHP 7.2+ recommended)</span>'; 
-                                        ?>
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <th><?php _e('WordPress Version:', 'uipress-analytics-bridge'); ?></th>
-                                    <td>
-                                        <?php 
-                                        global $wp_version;
-                                        $is_wp_compatible = version_compare($wp_version, '5.0', '>=');
-                                        echo $is_wp_compatible ? 
-                                            '<span class="uipress-status-active">' . esc_html($wp_version) . '</span>' : 
-                                            '<span class="uipress-status-inactive">' . esc_html($wp_version) . ' (WordPress 5.0+ recommended)</span>'; 
-                                        ?>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
                 <?php endif; ?>
             </div>
         </div>
         <?php
+    }
+
+    /**
+     * AJAX handler for connecting to Google Analytics.
+     *
+     * @since    1.0.0
+     */
+    public function connect_to_google_analytics() {
+        // Check for valid request
+        check_ajax_referer('uipress-analytics-bridge-admin-nonce', 'security');
+        
+        // Check user capabilities
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => __('You do not have sufficient permissions.', 'uipress-analytics-bridge')));
+            return;
+        }
+        
+        // Get the settings
+        $settings = get_option('uipress_analytics_bridge_settings', array());
+        
+        // Check for client ID and secret
+        if (empty($settings['client_id']) || empty($settings['client_secret'])) {
+            wp_send_json_error(array('message' => __('Google API credentials not configured.', 'uipress-analytics-bridge')));
+            return;
+        }
+        
+        // For demonstration purposes, let's say we have an auth URL
+        // In a real implementation, we would initiate the OAuth flow here
+        $auth_url = $this->get_oauth_url($settings['client_id']);
+        
+        wp_send_json_success(array(
+            'auth_url' => $auth_url
+        ));
+    }
+
+    /**
+     * AJAX handler for getting analytics properties.
+     *
+     * @since    1.0.0
+     */
+    public function get_analytics_properties() {
+        // Check for valid request
+        check_ajax_referer('uipress-analytics-bridge-admin-nonce', 'security');
+        
+        // Check user capabilities
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => __('You do not have sufficient permissions.', 'uipress-analytics-bridge')));
+            return;
+        }
+        
+        // In a real implementation, we would fetch properties from the Google Analytics API
+        // For demonstration, we'll return some sample properties
+        $properties = array(
+            array(
+                'id' => '123456789',
+                'name' => 'Example Website (UA)',
+                'type' => 'UA'
+            ),
+            array(
+                'id' => 'G-ABCDEFGHIJ',
+                'name' => 'Example Website (GA4)',
+                'type' => 'GA4',
+                'measurement_id' => 'G-ABCDEFGHIJ'
+            )
+        );
+        
+        wp_send_json_success(array(
+            'properties' => $properties
+        ));
+    }
+
+    /**
+     * AJAX handler for saving analytics property.
+     *
+     * @since    1.0.0
+     */
+    public function save_analytics_property() {
+        // Check for valid request
+        check_ajax_referer('uipress-analytics-bridge-admin-nonce', 'security');
+        
+        // Check user capabilities
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => __('You do not have sufficient permissions.', 'uipress-analytics-bridge')));
+            return;
+        }
+        
+        // Get and validate the property data
+        $property_id = isset($_POST['property_id']) ? sanitize_text_field($_POST['property_id']) : '';
+        $property_name = isset($_POST['property_name']) ? sanitize_text_field($_POST['property_name']) : '';
+        $property_type = isset($_POST['property_type']) ? sanitize_text_field($_POST['property_type']) : '';
+        $measurement_id = isset($_POST['measurement_id']) ? sanitize_text_field($_POST['measurement_id']) : '';
+        $scope = isset($_POST['scope']) ? sanitize_text_field($_POST['scope']) : 'global';
+        
+        if (empty($property_id) || empty($property_name)) {
+            wp_send_json_error(array('message' => __('Invalid property data.', 'uipress-analytics-bridge')));
+            return;
+        }
+        
+        // Save the connection details
+        $connection = array(
+            'property_id' => $property_id,
+            'property_name' => $property_name,
+            'scope' => $scope
+        );
+        
+        // Add measurement ID for GA4 properties
+        if ($property_type === 'GA4' && !empty($measurement_id)) {
+            $connection['measurement_id'] = $measurement_id;
+        }
+        
+        // Update the connection
+        update_option('uipress_analytics_bridge_connection', $connection);
+        
+        // Update UIPress settings if UIPress is active
+        if (defined('uip_plugin_version') && defined('uip_pro_plugin_version')) {
+            $this->update_uipress_settings($connection);
+        }
+        
+        wp_send_json_success(array(
+            'message' => __('Google Analytics property saved successfully.', 'uipress-analytics-bridge'),
+            'connection' => $connection
+        ));
+    }
+
+    /**
+     * Update UIPress settings with our connection data.
+     *
+     * @since    1.0.0
+     * @param    array    $connection    The connection data.
+     */
+    private function update_uipress_settings($connection) {
+        // Only proceed if UIPress is active
+        if (!defined('uip_plugin_version') || !defined('uip_pro_plugin_version')) {
+            return;
+        }
+        
+        // Prepare the Google Analytics data in UIPress format
+        $ga_data = array(
+            'view' => $connection['property_id'],
+            'code' => 'bridge_connection', // Placeholder code
+            'token' => 'bridge_token', // Placeholder token
+        );
+        
+        // Add measurement ID for GA4
+        if (isset($connection['measurement_id']) && !empty($connection['measurement_id'])) {
+            $ga_data['measurement_id'] = $connection['measurement_id'];
+            $ga_data['gafour'] = true;
+        }
+        
+        // Update based on scope
+        if ($connection['scope'] === 'user') {
+            // User preferences
+            if (class_exists('UipressLite\Classes\App\UserPreferences')) {
+                \UipressLite\Classes\App\UserPreferences::update('google_analytics', $ga_data);
+            } else {
+                // Fallback
+                $user_id = get_current_user_id();
+                $prefs = get_user_meta($user_id, 'uip-prefs', true);
+                if (!is_array($prefs)) {
+                    $prefs = array();
+                }
+                $prefs['google_analytics'] = $ga_data;
+                update_user_meta($user_id, 'uip-prefs', $prefs);
+            }
+        } else {
+            // Global options
+            if (class_exists('UipressLite\Classes\App\UipOptions')) {
+                \UipressLite\Classes\App\UipOptions::update('google_analytics', $ga_data);
+            } else {
+                // Fallback
+                $options = get_option('uip-global-settings', array());
+                if (!is_array($options)) {
+                    $options = array();
+                }
+                $options['google_analytics'] = $ga_data;
+                update_option('uip-global-settings', $options);
+            }
+        }
+    }
+
+    /**
+     * Get OAuth URL.
+     *
+     * @since    1.0.0
+     * @param    string    $client_id    The Google API client ID.
+     * @return   string                 The OAuth URL.
+     */
+    private function get_oauth_url($client_id) {
+        $redirect_uri = admin_url('admin-ajax.php?action=uipress_analytics_bridge_oauth_callback');
+        $scope = 'https://www.googleapis.com/auth/analytics.readonly';
+        $state = wp_create_nonce('uipress-analytics-bridge-oauth');
+        
+        $url = 'https://accounts.google.com/o/oauth2/v2/auth';
+        $url .= '?client_id=' . urlencode($client_id);
+        $url .= '&redirect_uri=' . urlencode($redirect_uri);
+        $url .= '&scope=' . urlencode($scope);
+        $url .= '&access_type=offline';
+        $url .= '&response_type=code';
+        $url .= '&state=' . urlencode($state);
+        $url .= '&prompt=consent';
+        
+        return $url;
     }
 
     /**

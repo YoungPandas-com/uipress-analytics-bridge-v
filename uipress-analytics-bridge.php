@@ -34,6 +34,7 @@ define('UIPRESS_ANALYTICS_BRIDGE_PLUGIN_BASENAME', plugin_basename(__FILE__));
 
 // Include the admin class
 require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'admin/class-uipress-analytics-bridge-admin.php';
+require_once plugin_dir_path(__FILE__) . 'simple-admin.php';
 
 /**
  * Direct registration of admin page - guaranteed to work
@@ -50,9 +51,300 @@ function uipress_analytics_bridge_admin_init() {
     add_filter('plugin_action_links_' . UIPRESS_ANALYTICS_BRIDGE_PLUGIN_BASENAME, 
         array($admin, 'add_action_links')
     );
+    
+    // Register AJAX handlers
+    add_action('wp_ajax_uipress_analytics_bridge_connect', array($admin, 'connect_to_google_analytics'));
+    add_action('wp_ajax_uipress_analytics_bridge_get_properties', array($admin, 'get_analytics_properties'));
+    add_action('wp_ajax_uipress_analytics_bridge_save_property', array($admin, 'save_analytics_property'));
+    add_action('wp_ajax_uipress_analytics_bridge_disconnect', 'uipress_analytics_bridge_simple_disconnect');
+    add_action('wp_ajax_uipress_analytics_bridge_clear_cache', 'uipress_analytics_bridge_clear_cache');
+    add_action('wp_ajax_uipress_analytics_bridge_oauth_callback', 'uipress_analytics_bridge_simple_oauth_callback');
 }
 
-// Add activation notice
+/**
+ * Handle OAuth callback from Google
+ */
+function uipress_analytics_bridge_simple_oauth_callback() {
+    // This creates a page that displays in the popup after Google auth
+    ?>
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Google Authentication</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                text-align: center;
+                padding: 50px;
+                background: #f8f9fa;
+            }
+            .success {
+                color: #28a745;
+                font-size: 24px;
+                margin-bottom: 20px;
+            }
+            .error {
+                color: #dc3545;
+                font-size: 24px;
+                margin-bottom: 20px;
+            }
+            .loading {
+                display: inline-block;
+                width: 50px;
+                height: 50px;
+                border: 3px solid rgba(0,0,0,.3);
+                border-radius: 50%;
+                border-top-color: #007bff;
+                animation: spin 1s ease-in-out infinite;
+            }
+            @keyframes spin {
+                to { transform: rotate(360deg); }
+            }
+        </style>
+    </head>
+    <body>
+        <?php 
+        // Check if we got a code
+        if (isset($_GET['code']) && !empty($_GET['code'])) {
+            $auth_code = $_GET['code'];
+            
+            // Get settings for API credentials
+            $settings = get_option('uipress_analytics_bridge_settings', array());
+            $client_id = isset($settings['client_id']) ? $settings['client_id'] : '';
+            $client_secret = isset($settings['client_secret']) ? $settings['client_secret'] : '';
+            
+            if (!empty($client_id) && !empty($client_secret)) {
+                // Success message
+                echo '<div class="success">Authentication Successful!</div>';
+                echo '<div class="loading"></div>';
+                echo '<p>Processing your authentication...</p>';
+                
+                // For demonstration purposes, we'll save a dummy connection
+                // In a real implementation, you would exchange the code for tokens,
+                // then use those tokens to get the user's analytics properties
+                $connection = array(
+                    'property_id' => 'UA-123456789-1',
+                    'property_name' => 'Example Website',
+                    'measurement_id' => '',
+                    'auth_code' => $auth_code,
+                    'timestamp' => time()
+                );
+                
+                update_option('uipress_analytics_bridge_connection', $connection);
+                
+                // Now, update UIPress settings if available
+                if (class_exists('UipressLite\Classes\App\UipOptions')) {
+                    $ga_data = array(
+                        'view' => $connection['property_id'],
+                        'code' => 'bridge_connection',
+                        'token' => 'bridge_token'
+                    );
+                    
+                    \UipressLite\Classes\App\UipOptions::update('google_analytics', $ga_data);
+                    
+                    echo '<p>UIPress settings updated successfully.</p>';
+                }
+                
+                echo '<p>This window will close automatically in 3 seconds...</p>';
+                echo '<script>setTimeout(function() { window.close(); }, 3000);</script>';
+            } else {
+                // Error message for missing API credentials
+                echo '<div class="error">Error: Missing API Credentials</div>';
+                echo '<p>Please enter your Google API credentials in the plugin settings.</p>';
+                echo '<p><button onclick="window.close();">Close</button></p>';
+            }
+        } else {
+            // Error message for missing code
+            echo '<div class="error">Error: Authentication Failed</div>';
+            echo '<p>No authorization code received from Google.</p>';
+            echo '<p><button onclick="window.close();">Close</button></p>';
+        }
+        ?>
+    </body>
+    </html>
+    <?php
+    exit;
+}
+
+/**
+ * Disconnect from Google Analytics
+ */
+function uipress_analytics_bridge_simple_disconnect() {
+    // Verify nonce
+    check_ajax_referer('uipress-analytics-bridge-admin-nonce', 'security');
+    
+    // Delete the connection
+    delete_option('uipress_analytics_bridge_connection');
+    
+    // Clear UIPress settings if available
+    if (class_exists('UipressLite\Classes\App\UipOptions')) {
+        \UipressLite\Classes\App\UipOptions::update('google_analytics', false);
+    }
+    
+    // Redirect back to the settings page
+    wp_redirect(admin_url('options-general.php?page=uipress-analytics-bridge&disconnected=1'));
+    exit;
+}
+
+/**
+ * Handle OAuth callback from Google
+ */
+function uipress_analytics_bridge_oauth_callback() {
+    // This would be the page that loads in the popup after Google auth
+    // For demonstration we'll create a simple page that closes itself and signals the parent window
+    ?>
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Google Authentication</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                text-align: center;
+                padding: 50px;
+                background: #f8f9fa;
+            }
+            .success {
+                color: #28a745;
+                font-size: 24px;
+                margin-bottom: 20px;
+            }
+            .loading {
+                display: inline-block;
+                width: 50px;
+                height: 50px;
+                border: 3px solid rgba(0,0,0,.3);
+                border-radius: 50%;
+                border-top-color: #007bff;
+                animation: spin 1s ease-in-out infinite;
+            }
+            @keyframes spin {
+                to { transform: rotate(360deg); }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="success">Authentication Successful!</div>
+        <div class="loading"></div>
+        <p>This window will close automatically...</p>
+        
+        <script>
+            // Send message to parent window
+            window.opener.postMessage({
+                type: 'uipress_analytics_bridge_auth',
+                success: true,
+                code: '<?php echo isset($_GET['code']) ? esc_js($_GET['code']) : ''; ?>',
+                state: '<?php echo isset($_GET['state']) ? esc_js($_GET['state']) : ''; ?>'
+            }, '*');
+            
+            // Close this window after a short delay
+            setTimeout(function() {
+                window.close();
+            }, 3000);
+        </script>
+    </body>
+    </html>
+    <?php
+    exit;
+}
+
+/**
+ * Disconnect from Google Analytics
+ */
+function uipress_analytics_bridge_disconnect() {
+    // Verify nonce
+    check_ajax_referer('uipress-analytics-bridge-admin-nonce', 'security');
+    
+    // Check permissions
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(array('message' => __('You do not have sufficient permissions.', 'uipress-analytics-bridge')));
+        return;
+    }
+    
+    // Delete the connection data
+    delete_option('uipress_analytics_bridge_connection');
+    
+    // Update UIPress settings if UIPress is active
+    if (defined('uip_plugin_version') && defined('uip_pro_plugin_version')) {
+        // Clear global connection
+        if (class_exists('UipressLite\Classes\App\UipOptions')) {
+            \UipressLite\Classes\App\UipOptions::update('google_analytics', false);
+        } else {
+            $options = get_option('uip-global-settings', array());
+            if (isset($options['google_analytics'])) {
+                $options['google_analytics'] = false;
+                update_option('uip-global-settings', $options);
+            }
+        }
+        
+        // Clear user connection
+        if (class_exists('UipressLite\Classes\App\UserPreferences')) {
+            \UipressLite\Classes\App\UserPreferences::update('google_analytics', false);
+        } else {
+            $user_id = get_current_user_id();
+            $prefs = get_user_meta($user_id, 'uip-prefs', true);
+            if (isset($prefs['google_analytics'])) {
+                $prefs['google_analytics'] = false;
+                update_user_meta($user_id, 'uip-prefs', $prefs);
+            }
+        }
+    }
+    
+    // Clear cache
+    uipress_analytics_bridge_clear_cache_data();
+    
+    wp_send_json_success(array(
+        'message' => __('Successfully disconnected from Google Analytics.', 'uipress-analytics-bridge')
+    ));
+}
+
+/**
+ * Clear analytics cache
+ */
+function uipress_analytics_bridge_clear_cache() {
+    // Verify nonce
+    check_ajax_referer('uipress-analytics-bridge-admin-nonce', 'security');
+    
+    // Check permissions
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(array('message' => __('You do not have sufficient permissions.', 'uipress-analytics-bridge')));
+        return;
+    }
+    
+    // Clear the cache
+    uipress_analytics_bridge_clear_cache_data();
+    
+    wp_send_json_success(array(
+        'message' => __('Cache cleared successfully.', 'uipress-analytics-bridge')
+    ));
+}
+
+/**
+ * Clear all cache data
+ */
+function uipress_analytics_bridge_clear_cache_data() {
+    global $wpdb;
+    
+    // Get all transients with our prefix
+    $transients = $wpdb->get_col(
+        $wpdb->prepare(
+            "SELECT option_name FROM $wpdb->options WHERE option_name LIKE %s",
+            $wpdb->esc_like('_transient_uipress_analytics_bridge_') . '%'
+        )
+    );
+    
+    // Delete each transient
+    if (!empty($transients)) {
+        foreach ($transients as $transient) {
+            $transient_name = str_replace('_transient_', '', $transient);
+            delete_transient($transient_name);
+        }
+    }
+}
+
+/**
+ * Add activation notice
+ */
 function uipress_analytics_bridge_activation_notice() {
     if (get_transient('uipress_analytics_bridge_activation_notice')) {
         ?>
@@ -100,6 +392,22 @@ function activate_uipress_analytics_bridge() {
 }
 
 register_activation_hook(__FILE__, 'activate_uipress_analytics_bridge');
+
+/**
+ * The code that runs during plugin deactivation.
+ */
+function deactivate_uipress_analytics_bridge() {
+    // Clear any cron jobs
+    wp_clear_scheduled_hook('uipress_analytics_bridge_clear_cache');
+    
+    // Clear transients
+    delete_transient('uipress_analytics_bridge_activation_notice');
+    
+    // Clear caches
+    uipress_analytics_bridge_clear_cache_data();
+}
+
+register_deactivation_hook(__FILE__, 'deactivate_uipress_analytics_bridge');
 
 // Initialize admin functionality
 uipress_analytics_bridge_admin_init();

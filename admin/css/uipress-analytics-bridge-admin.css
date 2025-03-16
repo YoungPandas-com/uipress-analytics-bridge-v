@@ -1,232 +1,205 @@
 /**
- * Admin Styles for UIPress Analytics Bridge
+ * Admin styles for UIPress Analytics Bridge
  */
 
-/* Main container styles */
-.uipress-analytics-bridge-header {
+/* Main container */
+.uipress-analytics-bridge-admin {
     margin: 20px 0;
-    padding: 15px;
-    background-color: #fff;
-    border-left: 4px solid #0c5cef;
-    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
 }
 
-/* Tab navigation */
-.uipress-analytics-bridge-tabs {
-    margin-top: 20px;
+/* Cards for sections */
+.uipress-analytics-card {
     background: #fff;
-    border: 1px solid #e2e4e7;
-    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
-}
-
-.uipress-analytics-bridge-tab-nav {
-    display: flex;
-    border-bottom: 1px solid #e2e4e7;
-    background: #f8f9fa;
-}
-
-.uipress-analytics-bridge-tab-nav a {
-    padding: 12px 15px;
-    text-decoration: none;
-    color: #555;
-    font-weight: 500;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
-}
-
-.uipress-analytics-bridge-tab-nav a:hover {
-    color: #0c5cef;
-}
-
-.uipress-analytics-bridge-tab-nav a.active {
-    border-bottom: 2px solid #0c5cef;
-    color: #0c5cef;
-    background: #fff;
-}
-
-/* Tab content */
-.uipress-analytics-bridge-tab-content {
+    border-radius: 4px;
     padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    border: 1px solid #e5e5e5;
 }
 
-.uipress-analytics-bridge-tab-pane {
-    display: none;
+.uipress-analytics-card h3 {
+    margin-top: 0;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #f0f0f0;
+    color: #1e1e2d;
+    font-size: 1.2em;
 }
 
-.uipress-analytics-bridge-tab-pane.active {
-    display: block;
+/* Status indicators */
+.uipress-status-active {
+    color: #2e7d32;
+    font-weight: 500;
+}
+
+.uipress-status-inactive {
+    color: #c62828;
+    font-weight: 500;
+}
+
+.uipress-status-warning {
+    color: #ff9800;
+    font-weight: 500;
 }
 
 /* Authentication section */
-.uipress-analytics-bridge-auth-status {
-    margin-bottom: 20px;
+.uipress-analytics-auth-status {
+    margin: 15px 0;
     padding: 15px;
-    background: #f8f9fa;
-    border: 1px solid #e2e4e7;
+    background: #f9f9f9;
     border-radius: 4px;
 }
 
-.uipress-analytics-bridge-auth-actions {
+.uipress-analytics-auth-buttons {
     margin-top: 15px;
 }
 
-.uipress-analytics-bridge-auth-actions button {
-    margin-right: 10px;
+.uipress-analytics-auth-buttons button {
+    margin-right: 10px !important;
 }
 
-.uipress-analytics-bridge-status-connected {
+/* Form fields */
+.uipress-analytics-bridge-admin .form-table th {
+    width: 200px;
+}
+
+.uipress-analytics-bridge-admin .form-table input[type="text"],
+.uipress-analytics-bridge-admin .form-table input[type="password"] {
+    width: 350px;
+}
+
+/* Status tables */
+.uipress-analytics-bridge-admin .widefat {
+    margin-top: 15px;
+    border-collapse: collapse;
+    width: 100%;
+}
+
+.uipress-analytics-bridge-admin .widefat th {
+    width: 240px;
+    text-align: left;
+}
+
+.uipress-analytics-bridge-admin .widefat td, 
+.uipress-analytics-bridge-admin .widefat th {
     padding: 10px;
-    background: #f0f9eb;
-    border-left: 4px solid #67c23a;
-    margin-bottom: 15px;
+    border-bottom: 1px solid #f0f0f0;
 }
 
-.uipress-analytics-bridge-status-disconnected {
-    padding: 10px;
-    background: #fef0f0;
-    border-left: 4px solid #f56c6c;
-    margin-bottom: 15px;
-}
-
-.uipress-analytics-bridge-properties {
-    margin-top: 20px;
-}
-
-/* Diagnostic section */
-.uipress-analytics-bridge-diagnostic {
-    margin-top: 20px;
-}
-
-.uipress-analytics-bridge-diagnostic h3 {
-    margin-top: 25px;
-    padding-bottom: 5px;
-    border-bottom: 1px solid #e2e4e7;
-}
-
-.uipress-analytics-bridge-diagnostic table {
-    margin-top: 10px;
-}
-
-/* Help section */
-.uipress-analytics-bridge-help {
-    margin-top: 20px;
-}
-
-.uipress-analytics-bridge-help h3 {
-    margin-top: 25px;
-    padding-bottom: 5px;
-    border-bottom: 1px solid #e2e4e7;
-}
-
-.uipress-analytics-bridge-help h4 {
-    margin-top: 20px;
-    margin-bottom: 10px;
-}
-
-.uipress-analytics-bridge-help ul,
-.uipress-analytics-bridge-help ol {
-    margin-left: 20px;
-}
-
-.uipress-analytics-bridge-help li {
-    margin-bottom: 10px;
-}
-
-/* Message styles */
-.uipress-analytics-bridge-message {
-    margin: 15px 0;
-    padding: 1px 12px;
-    border-left: 4px solid #0c5cef;
-    box-shadow: 0 1px 1px rgba(0,0,0,.04);
-    background: #fff;
-}
-
-.uipress-analytics-bridge-message p {
-    margin: 0.5em 0;
-    padding: 2px;
-}
-
-.uipress-analytics-bridge-message-info {
-    border-left-color: #0c5cef;
-}
-
-.uipress-analytics-bridge-message-success {
-    border-left-color: #46b450;
-}
-
-.uipress-analytics-bridge-message-error {
-    border-left-color: #dc3232;
-}
-
-/* Form styling to match UIPress */
-input[type="text"], 
-input[type="password"], 
-input[type="number"] {
+/* Test connection result */
+.uipress-analytics-test-result {
+    margin-top: 15px;
+    padding: 15px;
+    background: #f9f9f9;
     border-radius: 4px;
-    border: 1px solid #dcdcde;
+    border-left: 4px solid #ccc;
 }
 
-input[type="text"]:focus, 
-input[type="password"]:focus, 
-input[type="number"]:focus {
-    border-color: #0c5cef;
-    box-shadow: 0 0 0 1px #0c5cef;
-    outline: 2px solid transparent;
+.uipress-analytics-test-result.success {
+    border-left-color: #2e7d32;
+    background-color: #f1f8e9;
 }
 
-.button.button-primary {
+.uipress-analytics-test-result.error {
+    border-left-color: #c62828;
+    background-color: #ffebee;
+}
+
+/* Button spacing */
+.uipress-analytics-bridge-admin .button {
+    margin-right: 5px;
+}
+
+/* OAuth modal */
+.uipress-oauth-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.uipress-oauth-modal-content {
+    background: white;
+    padding: 20px;
+    border-radius: 4px;
+    max-width: 500px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.uipress-oauth-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.uipress-oauth-modal-header h3 {
+    margin: 0;
+    color: #1e1e2d;
+}
+
+.uipress-oauth-modal-close {
+    cursor: pointer;
+    width: 24px;
+    height: 24px;
+    line-height: 24px;
+    text-align: center;
+    border-radius: 50%;
+    background: #f0f0f0;
+}
+
+.uipress-oauth-modal-close:hover {
+    background: #e0e0e0;
+}
+
+.uipress-oauth-modal-footer {
+    margin-top: 20px;
+    padding-top: 10px;
+    border-top: 1px solid #f0f0f0;
+    text-align: right;
+}
+
+/* Make fields in the status table wrap properly */
+.uipress-analytics-bridge-admin .widefat td {
+    word-break: break-word;
+}
+
+/* Match UIPress color scheme */
+.uipress-analytics-bridge-admin .button-primary {
     background: #0c5cef;
     border-color: #0c5cef;
 }
 
-.button.button-primary:hover,
-.button.button-primary:focus {
-    background: #0a4fd0;
-    border-color: #0a4fd0;
+.uipress-analytics-bridge-admin .button-primary:hover {
+    background: #0a51d1;
+    border-color: #0a51d1;
 }
 
-/* Tables */
-.widefat {
-    border-collapse: collapse;
-    width: 100%;
-    margin-top: 15px;
-    margin-bottom: 15px;
+.uipress-analytics-bridge-admin .nav-tab-active {
+    border-top-color: #0c5cef;
 }
 
-.widefat th {
-    text-align: left;
-    padding: 8px;
-    background: #f8f9fa;
-    border-bottom: 1px solid #e2e4e7;
-}
-
-.widefat td {
-    padding: 8px;
-    border-bottom: 1px solid #f0f0f1;
-}
-
-.widefat tr:last-child td {
-    border-bottom: none;
-}
-
-.widefat tr:hover td {
-    background: #f8f9fa;
-}
-
-/* Responsive adjustments */
+/* Make the page responsive */
 @media screen and (max-width: 782px) {
-    .uipress-analytics-bridge-tab-nav {
-        flex-direction: column;
+    .uipress-analytics-bridge-admin .form-table th {
+        width: auto;
     }
     
-    .uipress-analytics-bridge-tab-nav a {
-        border-left: 2px solid transparent;
-        border-bottom: none;
-        padding: 10px;
+    .uipress-analytics-bridge-admin .form-table input[type="text"],
+    .uipress-analytics-bridge-admin .form-table input[type="password"] {
+        width: 100%;
     }
     
-    .uipress-analytics-bridge-tab-nav a.active {
-        border-left: 2px solid #0c5cef;
-        border-bottom: none;
+    .uipress-analytics-bridge-admin .widefat th {
+        width: 180px;
     }
 }

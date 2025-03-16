@@ -1,7 +1,8 @@
 <?php
 /**
- * Google API data retrieval handler.
+ * The class responsible for Google API data retrieval.
  *
+ * @since      1.0.0
  * @package    UIPress_Analytics_Bridge
  * @subpackage UIPress_Analytics_Bridge/includes/api
  */
@@ -14,551 +15,587 @@ if (!defined('ABSPATH')) {
 class UIPress_Analytics_Bridge_API_Data {
 
     /**
-     * The API auth handler instance.
+     * The ID of this plugin.
      *
      * @since    1.0.0
      * @access   private
-     * @var      UIPress_Analytics_Bridge_API_Auth    $api_auth    Handles Google API authentication.
+     * @var      string    $plugin_name    The ID of this plugin.
      */
-    private $api_auth;
+    private $plugin_name;
 
     /**
-     * Cache expiration time (in seconds).
+     * The version of this plugin.
      *
      * @since    1.0.0
      * @access   private
-     * @var      int    $cache_expiration    The cache expiration time.
+     * @var      string    $version    The current version of this plugin.
      */
-    private $cache_expiration = 3600; // 1 hour
+    private $version;
+
+    /**
+     * API Auth instance.
+     *
+     * @since    1.0.0
+     * @access   private
+     * @var      UIPress_Analytics_Bridge_API_Auth    $api_auth    The API auth instance.
+     */
+    private $api_auth;
 
     /**
      * Initialize the class and set its properties.
      *
      * @since    1.0.0
-     * @param    UIPress_Analytics_Bridge_API_Auth    $api_auth    The API auth handler instance.
+     * @param    string    $plugin_name       The name of this plugin.
+     * @param    string    $version           The version of this plugin.
      */
-    public function __construct($api_auth) {
-        $this->api_auth = $api_auth;
+    public function __construct($plugin_name, $version) {
+        $this->plugin_name = $plugin_name;
+        $this->version = $version;
+        $this->api_auth = new UIPress_Analytics_Bridge_API_Auth($plugin_name, $version);
     }
 
     /**
-     * Get the Google Analytics properties for the authenticated user.
+     * Get analytics data from the Google Analytics API.
      *
      * @since    1.0.0
-     * @param    string    $access_token    The access token.
-     * @return   array|WP_Error    The properties or an error.
+     * @param    array     $auth_data     The authentication data.
+     * @param    array     $date_range    The date range.
+     * @param    array     $metrics       The metrics to fetch.
+     * @param    array     $dimensions    The dimensions to fetch.
+     * @param    int       $max_results   The maximum number of results.
+     * @return   array                    The analytics data.
      */
-    public function get_analytics_properties($access_token) {
-        // First, try to get GA4 properties
-        $ga4_properties = $this->get_ga4_properties($access_token);
-        
-        if (!is_wp_error($ga4_properties) && !empty($ga4_properties)) {
-            return $ga4_properties;
+    public function get_analytics_data($auth_data, $date_range = array(), $metrics = array(), $dimensions = array(), $max_results = 10) {
+        // Check if authentication data is valid
+        if (!is_array($auth_data) || !isset($auth_data['view']) || !isset($auth_data['token'])) {
+            return $this->generate_error_response(
+                'No valid authentication data found.',
+                'no_auth_data'
+            );
         }
-        
-        // If no GA4 properties or error, try Universal Analytics properties
-        $ua_properties = $this->get_universal_analytics_properties($access_token);
-        
-        if (!is_wp_error($ua_properties) && !empty($ua_properties)) {
-            return $ua_properties;
-        }
-        
-        // If both failed, return the GA4 error (it's likely more relevant)
-        if (is_wp_error($ga4_properties)) {
-            return $ga4_properties;
-        }
-        
-        // If no properties found
-        return new WP_Error('no_properties', __('No Google Analytics properties found.', 'uipress-analytics-bridge'));
-    }
 
-    /**
-     * Get Google Analytics 4 properties.
-     *
-     * @since    1.0.0
-     * @param    string    $access_token    The access token.
-     * @return   array|WP_Error    The properties or an error.
-     */
-    private function get_ga4_properties($access_token) {
-        // GA4 API endpoint
-        $url = 'https://analyticsadmin.googleapis.com/v1beta/properties';
+        // Determine if this is GA4 or Universal Analytics
+        $is_ga4 = isset($auth_data['gafour']) && $auth_data['gafour'];
         
-        // Make the request
-        $response = wp_remote_get($url, array(
-            'headers' => array(
-                'Authorization' => 'Bearer ' . $access_token,
-                'Content-Type' => 'application/json',
-            ),
-            'timeout' => 15,
-        ));
-        
-        // Check for errors
-        if (is_wp_error($response)) {
-            return $response;
+        // Set default metrics and dimensions if not provided
+        if (empty($metrics)) {
+            $metrics = $is_ga4 ? 
+                array('activeUsers', 'screenPageViews', 'sessions') : 
+                array('ga:users', 'ga:pageviews', 'ga:sessions');
         }
         
-        // Parse the response
-        $body = wp_remote_retrieve_body($response);
-        $data = json_decode($body, true);
-        
-        // Check if the response contains an error
-        if (isset($data['error'])) {
-            return new WP_Error('ga4_properties_error', $data['error']['message'] ?? __('Failed to get GA4 properties.', 'uipress-analytics-bridge'));
+        if (empty($dimensions)) {
+            $dimensions = $is_ga4 ? 
+                array('date') : 
+                array('ga:date');
         }
         
-        // Process the properties
-        $properties = array();
-        
-        if (isset($data['properties']) && is_array($data['properties'])) {
-            foreach ($data['properties'] as $property) {
-                if (isset($property['name'])) {
-                    $property_id = str_replace('properties/', '', $property['name']);
-                    
-                    // Get the data streams for this property to find the measurement ID
-                    $measurement_id = $this->get_property_measurement_id($property_id, $access_token);
-                    
-                    $properties[] = array(
-                        'id' => $property_id,
-                        'name' => $property['displayName'] ?? $property_id,
-                        'type' => 'GA4',
-                        'measurement_id' => $measurement_id,
-                    );
-                }
-            }
+        // Set default date range if not provided
+        if (empty($date_range) || !isset($date_range['start']) || !isset($date_range['end'])) {
+            $end_date = date('Y-m-d');
+            $start_date = date('Y-m-d', strtotime('-30 days'));
+            
+            $date_range = array(
+                'start' => $start_date,
+                'end' => $end_date
+            );
         }
         
-        return $properties;
-    }
-
-    /**
-     * Get the measurement ID for a GA4 property.
-     *
-     * @since    1.0.0
-     * @param    string    $property_id     The property ID.
-     * @param    string    $access_token    The access token.
-     * @return   string    The measurement ID.
-     */
-    private function get_property_measurement_id($property_id, $access_token) {
-        // Data streams API endpoint
-        $url = "https://analyticsadmin.googleapis.com/v1beta/properties/{$property_id}/dataStreams";
-        
-        // Make the request
-        $response = wp_remote_get($url, array(
-            'headers' => array(
-                'Authorization' => 'Bearer ' . $access_token,
-                'Content-Type' => 'application/json',
-            ),
-            'timeout' => 15,
-        ));
-        
-        // Check for errors
-        if (is_wp_error($response)) {
-            return '';
-        }
-        
-        // Parse the response
-        $body = wp_remote_retrieve_body($response);
-        $data = json_decode($body, true);
-        
-        // Check if the response contains data streams
-        if (isset($data['dataStreams']) && is_array($data['dataStreams'])) {
-            foreach ($data['dataStreams'] as $stream) {
-                if (isset($stream['webStreamData']['measurementId'])) {
-                    return $stream['webStreamData']['measurementId'];
-                }
-            }
-        }
-        
-        return '';
-    }
-
-    /**
-     * Get Universal Analytics properties.
-     *
-     * @since    1.0.0
-     * @param    string    $access_token    The access token.
-     * @return   array|WP_Error    The properties or an error.
-     */
-    private function get_universal_analytics_properties($access_token) {
-        // UA Management API endpoint
-        $url = 'https://www.googleapis.com/analytics/v3/management/accounts/~all/webproperties/~all/profiles';
-        
-        // Make the request
-        $response = wp_remote_get($url, array(
-            'headers' => array(
-                'Authorization' => 'Bearer ' . $access_token,
-                'Content-Type' => 'application/json',
-            ),
-            'timeout' => 15,
-        ));
-        
-        // Check for errors
-        if (is_wp_error($response)) {
-            return $response;
-        }
-        
-        // Parse the response
-        $body = wp_remote_retrieve_body($response);
-        $data = json_decode($body, true);
-        
-        // Check if the response contains an error
-        if (isset($data['error'])) {
-            return new WP_Error('ua_properties_error', $data['error']['message'] ?? __('Failed to get Universal Analytics properties.', 'uipress-analytics-bridge'));
-        }
-        
-        // Process the properties
-        $properties = array();
-        
-        if (isset($data['items']) && is_array($data['items'])) {
-            foreach ($data['items'] as $profile) {
-                if (isset($profile['id'])) {
-                    $properties[] = array(
-                        'id' => $profile['id'],
-                        'name' => $profile['name'] ?? $profile['id'],
-                        'type' => 'UA',
-                        'websiteUrl' => $profile['websiteUrl'] ?? '',
-                        'accountId' => $profile['accountId'] ?? '',
-                        'webPropertyId' => $profile['webPropertyId'] ?? '',
-                    );
-                }
-            }
-        }
-        
-        return $properties;
-    }
-
-    /**
-     * Get Analytics data for a specific property.
-     *
-     * @since    1.0.0
-     * @param    string    $property_id     The property ID.
-     * @param    string    $access_token    The access token.
-     * @param    string    $start_date      The start date (YYYY-MM-DD).
-     * @param    string    $end_date        The end date (YYYY-MM-DD).
-     * @param    string    $metrics         The metrics to retrieve.
-     * @param    string    $dimensions      The dimensions to retrieve.
-     * @param    string    $property_type   The property type ('GA4' or 'UA').
-     * @return   array|WP_Error    The analytics data or an error.
-     */
-    public function get_analytics_data($property_id, $access_token, $start_date, $end_date, $metrics, $dimensions, $property_type = 'GA4') {
-        // Generate a cache key
-        $cache_key = md5("uipress_analytics_{$property_id}_{$start_date}_{$end_date}_{$metrics}_{$dimensions}_{$property_type}");
-        
-        // Check if we have cached data
-        $cached_data = get_transient($cache_key);
-        
-        if ($cached_data !== false) {
-            return $cached_data;
-        }
-        
-        // Get the data based on the property type
-        if ($property_type === 'GA4') {
-            $data = $this->get_ga4_data($property_id, $access_token, $start_date, $end_date, $metrics, $dimensions);
+        // Get analytics data based on API version
+        if ($is_ga4) {
+            $data = $this->get_ga4_data($auth_data, $date_range, $metrics, $dimensions, $max_results);
         } else {
-            $data = $this->get_universal_analytics_data($property_id, $access_token, $start_date, $end_date, $metrics, $dimensions);
+            $data = $this->get_universal_analytics_data($auth_data, $date_range, $metrics, $dimensions, $max_results);
         }
         
-        // Cache the data if it's not an error
-        if (!is_wp_error($data)) {
-            set_transient($cache_key, $data, $this->cache_expiration);
+        // Check for error in response
+        if (isset($data['error'])) {
+            // Try to refresh the token and try again
+            if ($data['error_type'] === 'token_expired' && isset($auth_data['refresh_token'])) {
+                $tokens = $this->api_auth->refresh_access_token($auth_data['refresh_token']);
+                
+                if (!isset($tokens['error'])) {
+                    // Update auth data with new token
+                    $auth_data['token'] = $tokens['access_token'];
+                    $auth_data['expires'] = time() + $tokens['expires_in'];
+                    
+                    // Save updated auth data
+                    $this->save_auth_data($auth_data);
+                    
+                    // Try again with new token
+                    if ($is_ga4) {
+                        $data = $this->get_ga4_data($auth_data, $date_range, $metrics, $dimensions, $max_results);
+                    } else {
+                        $data = $this->get_universal_analytics_data($auth_data, $date_range, $metrics, $dimensions, $max_results);
+                    }
+                }
+            }
+            
+            // If still error, return error response
+            if (isset($data['error'])) {
+                return $this->generate_error_response(
+                    $data['message'],
+                    $data['error_type']
+                );
+            }
         }
         
-        return $data;
+        // Get additional data for a complete response
+        $top_content = $this->get_top_content($auth_data, $date_range, $max_results);
+        $top_sources = $this->get_top_sources($auth_data, $date_range, $max_results);
+        
+        // Calculate period comparison for metrics
+        $previous_period = $this->get_previous_period_data($auth_data, $date_range, $metrics, $dimensions);
+        
+        // Format the response to match UIPress Pro expectations
+        $response = $this->format_analytics_response($data, $top_content, $top_sources, $previous_period, $auth_data);
+        
+        // Cache the response
+        $this->cache_analytics_data($response, $auth_data['view'], $date_range);
+        
+        return $response;
     }
 
     /**
      * Get GA4 data.
      *
      * @since    1.0.0
-     * @param    string    $property_id     The property ID.
-     * @param    string    $access_token    The access token.
-     * @param    string    $start_date      The start date (YYYY-MM-DD).
-     * @param    string    $end_date        The end date (YYYY-MM-DD).
-     * @param    string    $metrics         The metrics to retrieve.
-     * @param    string    $dimensions      The dimensions to retrieve.
-     * @return   array|WP_Error    The analytics data or an error.
+     * @param    array     $auth_data     The authentication data.
+     * @param    array     $date_range    The date range.
+     * @param    array     $metrics       The metrics to fetch.
+     * @param    array     $dimensions    The dimensions to fetch.
+     * @param    int       $max_results   The maximum number of results.
+     * @return   array                    The GA4 data.
      */
-    private function get_ga4_data($property_id, $access_token, $start_date, $end_date, $metrics, $dimensions) {
-        // GA4 Data API endpoint
-        $url = "https://analyticsdata.googleapis.com/v1beta/properties/{$property_id}:runReport";
+    private function get_ga4_data($auth_data, $date_range, $metrics, $dimensions, $max_results) {
+        // Check for cached data
+        $cached_data = $this->get_cached_analytics_data($auth_data['view'], $date_range);
         
-        // Parse metrics and dimensions
-        $metrics_array = explode(',', $metrics);
-        $dimensions_array = explode(',', $dimensions);
-        
-        // Prepare metrics objects
-        $metrics_objects = array();
-        foreach ($metrics_array as $metric) {
-            $metrics_objects[] = array('name' => trim($metric));
+        if ($cached_data) {
+            return $cached_data;
         }
         
-        // Prepare dimensions objects
-        $dimensions_objects = array();
-        foreach ($dimensions_array as $dimension) {
-            if (!empty(trim($dimension))) {
-                $dimensions_objects[] = array('name' => trim($dimension));
-            }
+        // Format metrics and dimensions for GA4
+        $formatted_metrics = array();
+        $formatted_dimensions = array();
+        
+        foreach ($metrics as $metric) {
+            $formatted_metrics[] = array('name' => $metric);
         }
         
-        // Prepare the request body
-        $body = array(
+        foreach ($dimensions as $dimension) {
+            $formatted_dimensions[] = array('name' => $dimension);
+        }
+        
+        // Build request body for GA4 API
+        $request_body = array(
             'dateRanges' => array(
                 array(
-                    'startDate' => $start_date,
-                    'endDate' => $end_date,
-                ),
+                    'startDate' => $date_range['start'],
+                    'endDate' => $date_range['end']
+                )
             ),
-            'metrics' => $metrics_objects,
+            'metrics' => $formatted_metrics,
+            'dimensions' => $formatted_dimensions,
+            'limit' => $max_results
         );
         
-        // Add dimensions if available
-        if (!empty($dimensions_objects)) {
-            $body['dimensions'] = $dimensions_objects;
-        }
+        // Make API request to GA4
+        $response = wp_remote_post(
+            'https://analyticsdata.googleapis.com/v1beta/properties/' . $this->extract_property_id($auth_data['view']) . ':runReport',
+            array(
+                'headers' => array(
+                    'Authorization' => 'Bearer ' . $auth_data['token'],
+                    'Content-Type' => 'application/json'
+                ),
+                'body' => json_encode($request_body),
+                'timeout' => 15
+            )
+        );
         
-        // Make the request
-        $response = wp_remote_post($url, array(
-            'headers' => array(
-                'Authorization' => 'Bearer ' . $access_token,
-                'Content-Type' => 'application/json',
-            ),
-            'body' => json_encode($body),
-            'timeout' => 15,
-        ));
-        
-        // Check for errors
+        // Check for WP error
         if (is_wp_error($response)) {
-            return $response;
+            return array(
+                'error' => true,
+                'error_type' => 'wp_error',
+                'message' => $response->get_error_message()
+            );
         }
         
-        // Parse the response
+        // Parse response
         $body = wp_remote_retrieve_body($response);
         $data = json_decode($body, true);
         
-        // Check if the response contains an error
+        // Check for API error
         if (isset($data['error'])) {
-            return new WP_Error('ga4_data_error', $data['error']['message'] ?? __('Failed to get GA4 data.', 'uipress-analytics-bridge'));
-        }
-        
-        // Process the response into a format compatible with UIPress
-        return $this->format_ga4_data_for_uipress($data, $metrics_array, $dimensions_array);
-    }
-
-    /**
-     * Format GA4 data for UIPress compatibility.
-     *
-     * @since    1.0.0
-     * @param    array    $data              The GA4 data.
-     * @param    array    $metrics_array     The metrics array.
-     * @param    array    $dimensions_array  The dimensions array.
-     * @return   array    The formatted data.
-     */
-    private function format_ga4_data_for_uipress($data, $metrics_array, $dimensions_array) {
-        $formatted_data = array(
-            'success' => true,
-            'connected' => true,
-            'data' => array(),
-            'totalStats' => array(
-                'users' => 0,
-                'pageviews' => 0,
-                'sessions' => 0,
-                'change' => array(
-                    'users' => 0,
-                    'pageviews' => 0,
-                    'sessions' => 0,
-                ),
-            ),
-            'topContent' => array(),
-            'topSources' => array(),
-            'gafour' => true,
-        );
-        
-        // Check if we have row data
-        if (!isset($data['rows']) || empty($data['rows'])) {
-            return $formatted_data;
-        }
-        
-        // Get dimension headers
-        $dimension_headers = array();
-        if (isset($data['dimensionHeaders'])) {
-            foreach ($data['dimensionHeaders'] as $header) {
-                $dimension_headers[] = $header['name'];
-            }
-        }
-        
-        // Get metric headers
-        $metric_headers = array();
-        if (isset($data['metricHeaders'])) {
-            foreach ($data['metricHeaders'] as $header) {
-                $metric_headers[] = $header['name'];
-            }
-        }
-        
-        // Process rows
-        foreach ($data['rows'] as $row) {
-            $row_data = array();
+            $error_type = 'api_error';
             
-            // Process dimensions
-            if (isset($row['dimensionValues'])) {
-                foreach ($row['dimensionValues'] as $index => $dimension) {
-                    $key = isset($dimension_headers[$index]) ? $dimension_headers[$index] : "dimension{$index}";
-                    $row_data[$key] = $dimension['value'];
-                }
+            // Check for token expired error
+            if (isset($data['error']['status']) && $data['error']['status'] === 'UNAUTHENTICATED') {
+                $error_type = 'token_expired';
             }
             
-            // Process metrics
-            if (isset($row['metricValues'])) {
-                foreach ($row['metricValues'] as $index => $metric) {
-                    $key = isset($metric_headers[$index]) ? $metric_headers[$index] : "metric{$index}";
-                    $row_data[$key] = $metric['value'];
-                }
-            }
-            
-            // Add to appropriate array based on dimension
-            if (in_array('date', $dimension_headers)) {
-                // Time series data
-                $formatted_data['data'][] = array(
-                    'name' => isset($row_data['date']) ? $row_data['date'] : '',
-                    'value' => isset($row_data['totalUsers']) ? intval($row_data['totalUsers']) : 0,
-                    'pageviews' => isset($row_data['screenPageViews']) ? intval($row_data['screenPageViews']) : 0,
-                    'sessions' => isset($row_data['sessions']) ? intval($row_data['sessions']) : 0,
-                );
-                
-                // Add to totals
-                $formatted_data['totalStats']['users'] += isset($row_data['totalUsers']) ? intval($row_data['totalUsers']) : 0;
-                $formatted_data['totalStats']['pageviews'] += isset($row_data['screenPageViews']) ? intval($row_data['screenPageViews']) : 0;
-                $formatted_data['totalStats']['sessions'] += isset($row_data['sessions']) ? intval($row_data['sessions']) : 0;
-            } elseif (in_array('pageTitle', $dimension_headers) || in_array('pagePath', $dimension_headers)) {
-                // Top content
-                $formatted_data['topContent'][] = array(
-                    'path' => isset($row_data['pagePath']) ? $row_data['pagePath'] : '',
-                    'title' => isset($row_data['pageTitle']) ? $row_data['pageTitle'] : '',
-                    'pageviews' => isset($row_data['screenPageViews']) ? intval($row_data['screenPageViews']) : 0,
-                    'engagement' => isset($row_data['engagementRate']) ? floatval($row_data['engagementRate']) : 0,
-                    'users' => isset($row_data['totalUsers']) ? intval($row_data['totalUsers']) : 0,
-                );
-            } elseif (in_array('source', $dimension_headers)) {
-                // Top sources
-                $formatted_data['topSources'][] = array(
-                    'source' => isset($row_data['source']) ? $row_data['source'] : '',
-                    'sessions' => isset($row_data['sessions']) ? intval($row_data['sessions']) : 0,
-                    'conversion' => isset($row_data['conversions']) ? floatval($row_data['conversions']) : 0,
-                );
-            }
+            return array(
+                'error' => true,
+                'error_type' => $error_type,
+                'message' => isset($data['error']['message']) ? $data['error']['message'] : 'Unknown API error'
+            );
         }
         
-        // Calculate change percentages (assuming the last row is the most recent period)
-        if (count($formatted_data['data']) > 1) {
-            $current_period_index = count($formatted_data['data']) - 1;
-            $previous_period_index = $current_period_index - 1;
-            
-            if (isset($formatted_data['data'][$current_period_index]) && isset($formatted_data['data'][$previous_period_index])) {
-                $current = $formatted_data['data'][$current_period_index];
-                $previous = $formatted_data['data'][$previous_period_index];
-                
-                // Calculate user change
-                if (isset($previous['value']) && $previous['value'] > 0) {
-                    $formatted_data['totalStats']['change']['users'] = (($current['value'] - $previous['value']) / $previous['value']) * 100;
-                }
-                
-                // Calculate pageview change
-                if (isset($previous['pageviews']) && $previous['pageviews'] > 0) {
-                    $formatted_data['totalStats']['change']['pageviews'] = (($current['pageviews'] - $previous['pageviews']) / $previous['pageviews']) * 100;
-                }
-                
-                // Calculate session change
-                if (isset($previous['sessions']) && $previous['sessions'] > 0) {
-                    $formatted_data['totalStats']['change']['sessions'] = (($current['sessions'] - $previous['sessions']) / $previous['sessions']) * 100;
-                }
-            }
-        }
-        
-        return $formatted_data;
+        return $data;
     }
 
     /**
      * Get Universal Analytics data.
      *
      * @since    1.0.0
-     * @param    string    $property_id     The property ID.
-     * @param    string    $access_token    The access token.
-     * @param    string    $start_date      The start date (YYYY-MM-DD).
-     * @param    string    $end_date        The end date (YYYY-MM-DD).
-     * @param    string    $metrics         The metrics to retrieve.
-     * @param    string    $dimensions      The dimensions to retrieve.
-     * @return   array|WP_Error    The analytics data or an error.
+     * @param    array     $auth_data     The authentication data.
+     * @param    array     $date_range    The date range.
+     * @param    array     $metrics       The metrics to fetch.
+     * @param    array     $dimensions    The dimensions to fetch.
+     * @param    int       $max_results   The maximum number of results.
+     * @return   array                    The Universal Analytics data.
      */
-    private function get_universal_analytics_data($property_id, $access_token, $start_date, $end_date, $metrics, $dimensions) {
-        // UA Reporting API endpoint
-        $url = 'https://www.googleapis.com/analytics/v3/data/ga';
+    private function get_universal_analytics_data($auth_data, $date_range, $metrics, $dimensions, $max_results) {
+        // Check for cached data
+        $cached_data = $this->get_cached_analytics_data($auth_data['view'], $date_range);
         
-        // Map GA4 metrics to UA metrics
-        $metrics = str_replace('totalUsers', 'ga:users', $metrics);
-        $metrics = str_replace('screenPageViews', 'ga:pageviews', $metrics);
-        $metrics = str_replace('sessions', 'ga:sessions', $metrics);
+        if ($cached_data) {
+            return $cached_data;
+        }
         
-        // Map GA4 dimensions to UA dimensions
-        $dimensions = str_replace('date', 'ga:date', $dimensions);
-        $dimensions = str_replace('pageTitle', 'ga:pageTitle', $dimensions);
-        $dimensions = str_replace('pagePath', 'ga:pagePath', $dimensions);
-        $dimensions = str_replace('source', 'ga:source', $dimensions);
+        // Ensure metrics have ga: prefix
+        $formatted_metrics = array();
+        foreach ($metrics as $metric) {
+            if (strpos($metric, 'ga:') !== 0) {
+                $metric = 'ga:' . $metric;
+            }
+            $formatted_metrics[] = $metric;
+        }
         
-        // Ensure metrics and dimensions are properly formatted
-        $metrics = preg_replace('/[^ga:,a-zA-Z0-9]/', '', $metrics);
-        $dimensions = preg_replace('/[^ga:,a-zA-Z0-9]/', '', $dimensions);
+        // Ensure dimensions have ga: prefix
+        $formatted_dimensions = array();
+        foreach ($dimensions as $dimension) {
+            if (strpos($dimension, 'ga:') !== 0) {
+                $dimension = 'ga:' . $dimension;
+            }
+            $formatted_dimensions[] = $dimension;
+        }
         
-        // Build the query parameters
-        $query_params = array(
-            'ids' => 'ga:' . $property_id,
-            'start-date' => $start_date,
-            'end-date' => $end_date,
-            'metrics' => $metrics,
+        // Build the API URL
+        $api_url = 'https://www.googleapis.com/analytics/v3/data/ga';
+        $api_url = add_query_arg(
+            array(
+                'ids' => 'ga:' . $auth_data['view'],
+                'start-date' => $date_range['start'],
+                'end-date' => $date_range['end'],
+                'metrics' => implode(',', $formatted_metrics),
+                'dimensions' => implode(',', $formatted_dimensions),
+                'max-results' => $max_results
+            ),
+            $api_url
         );
         
-        // Add dimensions if available
-        if (!empty($dimensions)) {
-            $query_params['dimensions'] = $dimensions;
-        }
+        // Make API request
+        $response = wp_remote_get(
+            $api_url,
+            array(
+                'headers' => array(
+                    'Authorization' => 'Bearer ' . $auth_data['token']
+                ),
+                'timeout' => 15
+            )
+        );
         
-        // Construct the full URL
-        $url .= '?' . http_build_query($query_params);
-        
-        // Make the request
-        $response = wp_remote_get($url, array(
-            'headers' => array(
-                'Authorization' => 'Bearer ' . $access_token,
-                'Content-Type' => 'application/json',
-            ),
-            'timeout' => 15,
-        ));
-        
-        // Check for errors
+        // Check for WP error
         if (is_wp_error($response)) {
-            return $response;
+            return array(
+                'error' => true,
+                'error_type' => 'wp_error',
+                'message' => $response->get_error_message()
+            );
         }
         
-        // Parse the response
+        // Parse response
         $body = wp_remote_retrieve_body($response);
         $data = json_decode($body, true);
         
-        // Check if the response contains an error
+        // Check for API error
         if (isset($data['error'])) {
-            return new WP_Error('ua_data_error', $data['error']['message'] ?? __('Failed to get Universal Analytics data.', 'uipress-analytics-bridge'));
+            $error_type = 'api_error';
+            
+            // Check for token expired error
+            if (isset($data['error']['code']) && $data['error']['code'] === 401) {
+                $error_type = 'token_expired';
+            }
+            
+            return array(
+                'error' => true,
+                'error_type' => $error_type,
+                'message' => isset($data['error']['message']) ? $data['error']['message'] : 'Unknown API error'
+            );
         }
         
-        // Process the response into a format compatible with UIPress
-        return $this->format_ua_data_for_uipress($data);
+        return $data;
     }
 
     /**
-     * Format Universal Analytics data for UIPress compatibility.
+     * Get top content.
      *
      * @since    1.0.0
-     * @param    array    $data    The UA data.
-     * @return   array    The formatted data.
+     * @param    array     $auth_data     The authentication data.
+     * @param    array     $date_range    The date range.
+     * @param    int       $max_results   The maximum number of results.
+     * @return   array                    The top content data.
      */
-    private function format_ua_data_for_uipress($data) {
-        $formatted_data = array(
+    private function get_top_content($auth_data, $date_range, $max_results = 10) {
+        // Determine if this is GA4 or Universal Analytics
+        $is_ga4 = isset($auth_data['gafour']) && $auth_data['gafour'];
+        
+        if ($is_ga4) {
+            // Define metrics and dimensions for GA4
+            $metrics = array('screenPageViews', 'activeUsers', 'engagementRate');
+            $dimensions = array('pagePath', 'pageTitle');
+            
+            // Get GA4 data
+            $data = $this->get_ga4_data($auth_data, $date_range, $metrics, $dimensions, $max_results);
+            
+            // Check for error
+            if (isset($data['error'])) {
+                return array();
+            }
+            
+            // Format the data
+            $top_content = array();
+            
+            if (isset($data['rows']) && is_array($data['rows'])) {
+                foreach ($data['rows'] as $row) {
+                    $page_path = '';
+                    $page_title = '';
+                    $pageviews = 0;
+                    $users = 0;
+                    $engagement = 0;
+                    
+                    // Extract dimension values
+                    foreach ($row['dimensionValues'] as $index => $dimension_value) {
+                        if ($dimensions[$index] === 'pagePath') {
+                            $page_path = $dimension_value['value'];
+                        } elseif ($dimensions[$index] === 'pageTitle') {
+                            $page_title = $dimension_value['value'];
+                        }
+                    }
+                    
+                    // Extract metric values
+                    foreach ($row['metricValues'] as $index => $metric_value) {
+                        if ($metrics[$index] === 'screenPageViews') {
+                            $pageviews = intval($metric_value['value']);
+                        } elseif ($metrics[$index] === 'activeUsers') {
+                            $users = intval($metric_value['value']);
+                        } elseif ($metrics[$index] === 'engagementRate') {
+                            $engagement = floatval($metric_value['value']) * 100;
+                        }
+                    }
+                    
+                    $top_content[] = array(
+                        'path' => $page_path,
+                        'title' => $page_title,
+                        'pageviews' => $pageviews,
+                        'engagement' => $engagement,
+                        'users' => $users
+                    );
+                }
+            }
+            
+            return $top_content;
+        } else {
+            // Define metrics and dimensions for Universal Analytics
+            $metrics = array('ga:pageviews', 'ga:users', 'ga:avgTimeOnPage');
+            $dimensions = array('ga:pagePath', 'ga:pageTitle');
+            
+            // Get Universal Analytics data
+            $data = $this->get_universal_analytics_data($auth_data, $date_range, $metrics, $dimensions, $max_results);
+            
+            // Check for error
+            if (isset($data['error'])) {
+                return array();
+            }
+            
+            // Format the data
+            $top_content = array();
+            
+            if (isset($data['rows']) && is_array($data['rows'])) {
+                foreach ($data['rows'] as $row) {
+                    $top_content[] = array(
+                        'path' => $row[0],
+                        'title' => $row[1],
+                        'pageviews' => intval($row[2]),
+                        'users' => intval($row[3]),
+                        'engagement' => round(floatval($row[4]), 2)
+                    );
+                }
+            }
+            
+            return $top_content;
+        }
+    }
+
+    /**
+     * Get top sources.
+     *
+     * @since    1.0.0
+     * @param    array     $auth_data     The authentication data.
+     * @param    array     $date_range    The date range.
+     * @param    int       $max_results   The maximum number of results.
+     * @return   array                    The top sources data.
+     */
+    private function get_top_sources($auth_data, $date_range, $max_results = 10) {
+        // Determine if this is GA4 or Universal Analytics
+        $is_ga4 = isset($auth_data['gafour']) && $auth_data['gafour'];
+        
+        if ($is_ga4) {
+            // Define metrics and dimensions for GA4
+            $metrics = array('sessions', 'conversions');
+            $dimensions = array('sessionSource');
+            
+            // Get GA4 data
+            $data = $this->get_ga4_data($auth_data, $date_range, $metrics, $dimensions, $max_results);
+            
+            // Check for error
+            if (isset($data['error'])) {
+                return array();
+            }
+            
+            // Format the data
+            $top_sources = array();
+            
+            if (isset($data['rows']) && is_array($data['rows'])) {
+                foreach ($data['rows'] as $row) {
+                    $source = '';
+                    $sessions = 0;
+                    $conversions = 0;
+                    
+                    // Extract dimension values
+                    foreach ($row['dimensionValues'] as $index => $dimension_value) {
+                        if ($dimensions[$index] === 'sessionSource') {
+                            $source = $dimension_value['value'];
+                        }
+                    }
+                    
+                    // Extract metric values
+                    foreach ($row['metricValues'] as $index => $metric_value) {
+                        if ($metrics[$index] === 'sessions') {
+                            $sessions = intval($metric_value['value']);
+                        } elseif ($metrics[$index] === 'conversions') {
+                            $conversions = intval($metric_value['value']);
+                        }
+                    }
+                    
+                    // Calculate conversion rate
+                    $conversion_rate = $sessions > 0 ? ($conversions / $sessions) * 100 : 0;
+                    
+                    $top_sources[] = array(
+                        'source' => $source,
+                        'sessions' => $sessions,
+                        'conversion' => round($conversion_rate, 2)
+                    );
+                }
+            }
+            
+            return $top_sources;
+        } else {
+            // Define metrics and dimensions for Universal Analytics
+            $metrics = array('ga:sessions', 'ga:goalCompletionsAll');
+            $dimensions = array('ga:source');
+            
+            // Get Universal Analytics data
+            $data = $this->get_universal_analytics_data($auth_data, $date_range, $metrics, $dimensions, $max_results);
+            
+            // Check for error
+            if (isset($data['error'])) {
+                return array();
+            }
+            
+            // Format the data
+            $top_sources = array();
+            
+            if (isset($data['rows']) && is_array($data['rows'])) {
+                foreach ($data['rows'] as $row) {
+                    $sessions = intval($row[1]);
+                    $conversions = intval($row[2]);
+                    
+                    // Calculate conversion rate
+                    $conversion_rate = $sessions > 0 ? ($conversions / $sessions) * 100 : 0;
+                    
+                    $top_sources[] = array(
+                        'source' => $row[0],
+                        'sessions' => $sessions,
+                        'conversion' => round($conversion_rate, 2)
+                    );
+                }
+            }
+            
+            return $top_sources;
+        }
+    }
+
+    /**
+     * Get previous period data.
+     *
+     * @since    1.0.0
+     * @param    array     $auth_data     The authentication data.
+     * @param    array     $date_range    The date range.
+     * @param    array     $metrics       The metrics to fetch.
+     * @param    array     $dimensions    The dimensions to fetch.
+     * @return   array                    The previous period data.
+     */
+    private function get_previous_period_data($auth_data, $date_range, $metrics, $dimensions) {
+        // Calculate previous period date range
+        $current_start = strtotime($date_range['start']);
+        $current_end = strtotime($date_range['end']);
+        $date_diff = $current_end - $current_start;
+        
+        $previous_end_date = date('Y-m-d', $current_start - 86400); // Day before current start
+        $previous_start_date = date('Y-m-d', $current_start - 86400 - $date_diff); // Same number of days before
+        
+        $previous_date_range = array(
+            'start' => $previous_start_date,
+            'end' => $previous_end_date
+        );
+        
+        // Determine if this is GA4 or Universal Analytics
+        $is_ga4 = isset($auth_data['gafour']) && $auth_data['gafour'];
+        
+        if ($is_ga4) {
+            $data = $this->get_ga4_data($auth_data, $previous_date_range, $metrics, $dimensions, 1000);
+        } else {
+            $data = $this->get_universal_analytics_data($auth_data, $previous_date_range, $metrics, $dimensions, 1000);
+        }
+        
+        // Check for error
+        if (isset($data['error'])) {
+            return array();
+        }
+        
+        return $data;
+    }
+
+    /**
+     * Format analytics response.
+     *
+     * @since    1.0.0
+     * @param    array     $data              The raw analytics data.
+     * @param    array     $top_content       The top content data.
+     * @param    array     $top_sources       The top sources data.
+     * @param    array     $previous_period   The previous period data.
+     * @param    array     $auth_data         The authentication data.
+     * @return   array                        The formatted response.
+     */
+    private function format_analytics_response($data, $top_content, $top_sources, $previous_period, $auth_data) {
+        // Determine if this is GA4 or Universal Analytics
+        $is_ga4 = isset($auth_data['gafour']) && $auth_data['gafour'];
+        
+        // Initialize response
+        $response = array(
             'success' => true,
             'connected' => true,
             'data' => array(),
@@ -569,113 +606,246 @@ class UIPress_Analytics_Bridge_API_Data {
                 'change' => array(
                     'users' => 0,
                     'pageviews' => 0,
-                    'sessions' => 0,
-                ),
+                    'sessions' => 0
+                )
             ),
-            'topContent' => array(),
-            'topSources' => array(),
-            'gafour' => false,
+            'topContent' => $top_content,
+            'topSources' => $top_sources,
+            'google_account' => array(
+                'view' => $auth_data['view'],
+                'code' => $auth_data['code'],
+                'token' => $auth_data['token']
+            ),
+            'gafour' => $is_ga4,
+            'property' => $auth_data['view'],
+            'measurement_id' => isset($auth_data['measurement_id']) ? $auth_data['measurement_id'] : ''
         );
         
-        // Check if we have row data
-        if (!isset($data['rows']) || empty($data['rows'])) {
-            return $formatted_data;
-        }
-        
-        // Get column headers
-        $headers = array();
-        if (isset($data['columnHeaders'])) {
-            foreach ($data['columnHeaders'] as $header) {
-                $headers[] = $header['name'];
-            }
-        }
-        
-        // Process rows
-        foreach ($data['rows'] as $row) {
-            $row_data = array();
-            
-            // Associate values with headers
-            foreach ($row as $index => $value) {
-                $key = isset($headers[$index]) ? str_replace('ga:', '', $headers[$index]) : "value{$index}";
-                $row_data[$key] = $value;
-            }
-            
-            // Add to appropriate array based on dimensions
-            if (isset($row_data['date'])) {
-                // Format date from YYYYMMDD to YYYY-MM-DD
-                $date = $row_data['date'];
-                $formatted_date = substr($date, 0, 4) . '-' . substr($date, 4, 2) . '-' . substr($date, 6, 2);
+        // Format time series data
+        if ($is_ga4) {
+            // Process GA4 data
+            if (isset($data['rows']) && is_array($data['rows'])) {
+                $total_users = 0;
+                $total_pageviews = 0;
+                $total_sessions = 0;
                 
-                // Time series data
-                $formatted_data['data'][] = array(
-                    'name' => $formatted_date,
-                    'value' => isset($row_data['users']) ? intval($row_data['users']) : 0,
-                    'pageviews' => isset($row_data['pageviews']) ? intval($row_data['pageviews']) : 0,
-                    'sessions' => isset($row_data['sessions']) ? intval($row_data['sessions']) : 0,
-                );
-                
-                // Add to totals
-                $formatted_data['totalStats']['users'] += isset($row_data['users']) ? intval($row_data['users']) : 0;
-                $formatted_data['totalStats']['pageviews'] += isset($row_data['pageviews']) ? intval($row_data['pageviews']) : 0;
-                $formatted_data['totalStats']['sessions'] += isset($row_data['sessions']) ? intval($row_data['sessions']) : 0;
-            } elseif (isset($row_data['pageTitle']) || isset($row_data['pagePath'])) {
-                // Top content
-                $formatted_data['topContent'][] = array(
-                    'path' => isset($row_data['pagePath']) ? $row_data['pagePath'] : '',
-                    'title' => isset($row_data['pageTitle']) ? $row_data['pageTitle'] : '',
-                    'pageviews' => isset($row_data['pageviews']) ? intval($row_data['pageviews']) : 0,
-                    'engagement' => isset($row_data['avgTimeOnPage']) ? floatval($row_data['avgTimeOnPage']) : 0,
-                    'users' => isset($row_data['users']) ? intval($row_data['users']) : 0,
-                );
-            } elseif (isset($row_data['source'])) {
-                // Top sources
-                $formatted_data['topSources'][] = array(
-                    'source' => isset($row_data['source']) ? $row_data['source'] : '',
-                    'sessions' => isset($row_data['sessions']) ? intval($row_data['sessions']) : 0,
-                    'conversion' => isset($row_data['goalCompletionsAll']) ? floatval($row_data['goalCompletionsAll']) : 0,
-                );
-            }
-        }
-        
-        // Calculate change percentages (assuming the last row is the most recent period)
-        if (count($formatted_data['data']) > 1) {
-            $current_period_index = count($formatted_data['data']) - 1;
-            $previous_period_index = $current_period_index - 1;
-            
-            if (isset($formatted_data['data'][$current_period_index]) && isset($formatted_data['data'][$previous_period_index])) {
-                $current = $formatted_data['data'][$current_period_index];
-                $previous = $formatted_data['data'][$previous_period_index];
-                
-                // Calculate user change
-                if (isset($previous['value']) && $previous['value'] > 0) {
-                    $formatted_data['totalStats']['change']['users'] = (($current['value'] - $previous['value']) / $previous['value']) * 100;
+                foreach ($data['rows'] as $row) {
+                    $date = '';
+                    $users = 0;
+                    $pageviews = 0;
+                    $sessions = 0;
+                    
+                    // Extract dimension values (date)
+                    foreach ($row['dimensionValues'] as $index => $dimension_value) {
+                        if ($data['dimensionHeaders'][$index]['name'] === 'date') {
+                            $date = $dimension_value['value'];
+                            // Format date from YYYYMMDD to YYYY-MM-DD
+                            $date = substr($date, 0, 4) . '-' . substr($date, 4, 2) . '-' . substr($date, 6, 2);
+                        }
+                    }
+                    
+                    // Extract metric values
+                    foreach ($row['metricValues'] as $index => $metric_value) {
+                        if ($data['metricHeaders'][$index]['name'] === 'activeUsers') {
+                            $users = intval($metric_value['value']);
+                            $total_users += $users;
+                        } elseif ($data['metricHeaders'][$index]['name'] === 'screenPageViews') {
+                            $pageviews = intval($metric_value['value']);
+                            $total_pageviews += $pageviews;
+                        } elseif ($data['metricHeaders'][$index]['name'] === 'sessions') {
+                            $sessions = intval($metric_value['value']);
+                            $total_sessions += $sessions;
+                        }
+                    }
+                    
+                    $response['data'][] = array(
+                        'name' => $date,
+                        'value' => $users,
+                        'pageviews' => $pageviews,
+                        'sessions' => $sessions
+                    );
                 }
                 
-                // Calculate pageview change
-                if (isset($previous['pageviews']) && $previous['pageviews'] > 0) {
-                    $formatted_data['totalStats']['change']['pageviews'] = (($current['pageviews'] - $previous['pageviews']) / $previous['pageviews']) * 100;
+                // Update total stats
+                $response['totalStats']['users'] = $total_users;
+                $response['totalStats']['pageviews'] = $total_pageviews;
+                $response['totalStats']['sessions'] = $total_sessions;
+                
+                // Calculate period-over-period change
+                if (isset($previous_period['rows']) && is_array($previous_period['rows'])) {
+                    $prev_total_users = 0;
+                    $prev_total_pageviews = 0;
+                    $prev_total_sessions = 0;
+                    
+                    foreach ($previous_period['rows'] as $row) {
+                        // Extract metric values
+                        foreach ($row['metricValues'] as $index => $metric_value) {
+                            if ($previous_period['metricHeaders'][$index]['name'] === 'activeUsers') {
+                                $prev_total_users += intval($metric_value['value']);
+                            } elseif ($previous_period['metricHeaders'][$index]['name'] === 'screenPageViews') {
+                                $prev_total_pageviews += intval($metric_value['value']);
+                            } elseif ($previous_period['metricHeaders'][$index]['name'] === 'sessions') {
+                                $prev_total_sessions += intval($metric_value['value']);
+                            }
+                        }
+                    }
+                    
+                    // Calculate percentage change
+                    $response['totalStats']['change']['users'] = $this->calculate_percentage_change($prev_total_users, $total_users);
+                    $response['totalStats']['change']['pageviews'] = $this->calculate_percentage_change($prev_total_pageviews, $total_pageviews);
+                    $response['totalStats']['change']['sessions'] = $this->calculate_percentage_change($prev_total_sessions, $total_sessions);
+                }
+            }
+        } else {
+            // Process Universal Analytics data
+            if (isset($data['rows']) && is_array($data['rows'])) {
+                $total_users = 0;
+                $total_pageviews = 0;
+                $total_sessions = 0;
+                
+                foreach ($data['rows'] as $row) {
+                    $date = $row[0]; // ga:date in YYYYMMDD format
+                    // Format date from YYYYMMDD to YYYY-MM-DD
+                    $date = substr($date, 0, 4) . '-' . substr($date, 4, 2) . '-' . substr($date, 6, 2);
+                    
+                    $users = intval($row[1]); // ga:users
+                    $pageviews = intval($row[2]); // ga:pageviews
+                    $sessions = intval($row[3]); // ga:sessions
+                    
+                    $total_users += $users;
+                    $total_pageviews += $pageviews;
+                    $total_sessions += $sessions;
+                    
+                    $response['data'][] = array(
+                        'name' => $date,
+                        'value' => $users,
+                        'pageviews' => $pageviews,
+                        'sessions' => $sessions
+                    );
                 }
                 
-                // Calculate session change
-                if (isset($previous['sessions']) && $previous['sessions'] > 0) {
-                    $formatted_data['totalStats']['change']['sessions'] = (($current['sessions'] - $previous['sessions']) / $previous['sessions']) * 100;
+                // Update total stats
+                $response['totalStats']['users'] = $total_users;
+                $response['totalStats']['pageviews'] = $total_pageviews;
+                $response['totalStats']['sessions'] = $total_sessions;
+                
+                // Calculate period-over-period change
+                if (isset($previous_period['rows']) && is_array($previous_period['rows'])) {
+                    $prev_total_users = 0;
+                    $prev_total_pageviews = 0;
+                    $prev_total_sessions = 0;
+                    
+                    foreach ($previous_period['rows'] as $row) {
+                        $prev_total_users += intval($row[1]); // ga:users
+                        $prev_total_pageviews += intval($row[2]); // ga:pageviews
+                        $prev_total_sessions += intval($row[3]); // ga:sessions
+                    }
+                    
+                    // Calculate percentage change
+                    $response['totalStats']['change']['users'] = $this->calculate_percentage_change($prev_total_users, $total_users);
+                    $response['totalStats']['change']['pageviews'] = $this->calculate_percentage_change($prev_total_pageviews, $total_pageviews);
+                    $response['totalStats']['change']['sessions'] = $this->calculate_percentage_change($prev_total_sessions, $total_sessions);
                 }
             }
         }
         
-        return $formatted_data;
+        return $response;
     }
 
     /**
-     * Get default analytics data structure.
+     * Calculate percentage change.
      *
      * @since    1.0.0
-     * @return   array    The default analytics data.
+     * @param    int       $old_value      The old value.
+     * @param    int       $new_value      The new value.
+     * @return   float                     The percentage change.
      */
-    public function get_default_analytics_data() {
+    private function calculate_percentage_change($old_value, $new_value) {
+        if ($old_value == 0) {
+            return $new_value > 0 ? 100 : 0;
+        }
+        
+        $change = (($new_value - $old_value) / $old_value) * 100;
+        return round($change, 2);
+    }
+
+    /**
+     * Extract property ID from view.
+     *
+     * @since    1.0.0
+     * @param    string    $view      The view/property ID.
+     * @return   string               The clean property ID.
+     */
+    private function extract_property_id($view) {
+        // GA4 properties start with G-
+        if (strpos($view, 'G-') === 0) {
+            return $view;
+        }
+        
+        // For numeric IDs, assume UA and return as is
+        if (is_numeric($view)) {
+            return $view;
+        }
+        
+        // For other formats, do some cleaning
+        return preg_replace('/[^\w\-]/', '', $view);
+    }
+
+    /**
+     * Get cached analytics data.
+     *
+     * @since    1.0.0
+     * @param    string    $view_id      The view/property ID.
+     * @param    array     $date_range   The date range.
+     * @return   array                   The cached data or false if not cached.
+     */
+    private function get_cached_analytics_data($view_id, $date_range) {
+        $cache_key = 'uipress_analytics_bridge_' . md5($view_id . json_encode($date_range));
+        $cached_data = get_transient($cache_key);
+        
+        if ($cached_data) {
+            return $cached_data;
+        }
+        
+        return false;
+    }
+
+    /**
+     * Cache analytics data.
+     *
+     * @since    1.0.0
+     * @param    array     $data         The data to cache.
+     * @param    string    $view_id      The view/property ID.
+     * @param    array     $date_range   The date range.
+     * @return   bool                    Whether the data was cached successfully.
+     */
+    private function cache_analytics_data($data, $view_id, $date_range) {
+        $cache_key = 'uipress_analytics_bridge_' . md5($view_id . json_encode($date_range));
+        $cache_time = 3600; // 1 hour
+        
+        // Get settings to override cache time if needed
+        $settings = get_option('uipress_analytics_bridge_settings', array());
+        if (isset($settings['cache_duration']) && is_numeric($settings['cache_duration'])) {
+            $cache_time = intval($settings['cache_duration']) * 60; // Convert minutes to seconds
+        }
+        
+        return set_transient($cache_key, $data, $cache_time);
+    }
+
+    /**
+     * Generate error response.
+     *
+     * @since    1.0.0
+     * @param    string    $message      The error message.
+     * @param    string    $error_type   The error type.
+     * @return   array                   The error response.
+     */
+    private function generate_error_response($message, $error_type = 'api_error') {
         return array(
-            'success' => true,
-            'connected' => false,
+            'success' => false,
+            'error' => true,
+            'message' => $message,
+            'error_type' => $error_type,
             'data' => array(),
             'totalStats' => array(
                 'users' => 0,
@@ -684,44 +854,57 @@ class UIPress_Analytics_Bridge_API_Data {
                 'change' => array(
                     'users' => 0,
                     'pageviews' => 0,
-                    'sessions' => 0,
-                ),
+                    'sessions' => 0
+                )
             ),
             'topContent' => array(),
-            'topSources' => array(),
-            'gafour' => true,
-            'message' => __('No data available', 'uipress-analytics-bridge'),
+            'topSources' => array()
         );
     }
 
     /**
-     * Build the query URL for UIPress compatibility.
+     * Save authentication data.
      *
      * @since    1.0.0
-     * @param    array     $analytics_data    The analytics data.
-     * @return   string    The query URL.
+     * @param    array     $auth_data            The authentication data.
+     * @param    bool      $use_user_preferences Whether to use user preferences.
+     * @return   bool                           Whether the save was successful.
      */
-    public function build_query_url($analytics_data) {
-        // Build a dummy URL for UIPress compatibility
-        $domain = get_home_url();
-        $code = isset($analytics_data['code']) ? urlencode($analytics_data['code']) : '';
-        $view = isset($analytics_data['view']) ? urlencode($analytics_data['view']) : '';
-        $token = isset($analytics_data['token']) ? urlencode($analytics_data['token']) : '';
-        $key = 'bridge-key';
-        $instance = 'bridge-instance';
-        
-        return "https://analytics.uipress.co/view.php?code={$code}&view={$view}&key={$key}&instance={$instance}&uip3=1&gafour=true&d={$domain}&uip_token={$token}";
-    }
-
-    /**
-     * Clear the analytics data cache.
-     *
-     * @since    1.0.0
-     */
-    public function clear_cache() {
-        global $wpdb;
-        
-        $wpdb->query("DELETE FROM {$wpdb->options} WHERE option_name LIKE '%_transient_uipress_analytics_%'");
-        $wpdb->query("DELETE FROM {$wpdb->options} WHERE option_name LIKE '%_transient_timeout_uipress_analytics_%'");
+    private function save_auth_data($auth_data, $use_user_preferences = false) {
+        // Use WordPress user meta or options based on preference
+        if ($use_user_preferences) {
+            // Use UserPreferences class if available
+            if (class_exists('UipressLite\Classes\App\UserPreferences')) {
+                \UipressLite\Classes\App\UserPreferences::update('google_analytics', $auth_data);
+                return true;
+            } else {
+                // Fallback to direct user meta
+                $user_id = get_current_user_id();
+                $user_prefs = get_user_meta($user_id, 'uip-prefs', true);
+                
+                if (!is_array($user_prefs)) {
+                    $user_prefs = array();
+                }
+                
+                $user_prefs['google_analytics'] = $auth_data;
+                return update_user_meta($user_id, 'uip-prefs', $user_prefs);
+            }
+        } else {
+            // Use UipOptions class if available
+            if (class_exists('UipressLite\Classes\App\UipOptions')) {
+                \UipressLite\Classes\App\UipOptions::update('google_analytics', $auth_data);
+                return true;
+            } else {
+                // Fallback to direct option
+                $options = get_option('uip-global-settings', array());
+                
+                if (!is_array($options)) {
+                    $options = array();
+                }
+                
+                $options['google_analytics'] = $auth_data;
+                return update_option('uip-global-settings', $options);
+            }
+        }
     }
 }

@@ -2,23 +2,32 @@
 /**
  * UIPress Analytics Bridge
  *
- * @package           UIPress_Analytics_Bridge
- * @author            Young Pandas
- * @copyright         2025 Young Pandas
- * @license           GPL-2.0-or-later
+ * @package     UIPress_Analytics_Bridge
+ * @author      Young Pandas
+ * @copyright   2025 Young Pandas
+ * @license     GPL-2.0+
  *
  * @wordpress-plugin
- * Plugin Name:       UIPress Analytics Bridge
- * Plugin URI:        https://yp.studio
- * Description:       Enhanced Google Analytics integration for UIPress Pro with improved authentication and reliability.
- * Version:           1.0.0
- * Requires at least: 5.8
- * Requires PHP:      7.4
- * Author:            Young Pandas
- * Author URI:        https://yp.studio
- * Text Domain:       uipress-analytics-bridge
- * License:           GPL v2 or later
- * License URI:       http://www.gnu.org/licenses/gpl-2.0.txt
+ * Plugin Name: UIPress Analytics Bridge
+ * Plugin URI:  https://yp.studio
+ * Description: Enhanced Google Analytics integration for UIPress Pro with improved authentication and data retrieval.
+ * Version:     1.0.0
+ * Author:      Young Pandas
+ * Author URI:  https://yp.studio
+ * Text Domain: uipress-analytics-bridge
+ * Domain Path: /languages
+ * License:     GPL-2.0+
+ * License URI: http://www.gnu.org/licenses/gpl-2.0.txt
+ *
+ * This plugin is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * any later version.
+ *
+ * This plugin is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
  */
 
 // If this file is called directly, abort.
@@ -28,22 +37,50 @@ if (!defined('ABSPATH')) {
 
 // Define plugin constants
 define('UIPRESS_ANALYTICS_BRIDGE_VERSION', '1.0.0');
-define('UIPRESS_ANALYTICS_BRIDGE_PLUGIN_NAME', 'uipress-analytics-bridge');
+define('UIPRESS_ANALYTICS_BRIDGE_PLUGIN_NAME', 'UIPress Analytics Bridge');
 define('UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH', plugin_dir_path(__FILE__));
 define('UIPRESS_ANALYTICS_BRIDGE_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('UIPRESS_ANALYTICS_BRIDGE_PLUGIN_BASENAME', plugin_basename(__FILE__));
 
 /**
- * Check if debug mode is enabled before loading the plugin.
+ * The code that runs during plugin activation.
+ */
+function activate_uipress_analytics_bridge() {
+    require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/class-uipress-analytics-bridge-activator.php';
+    UIPress_Analytics_Bridge_Activator::activate();
+}
+
+/**
+ * The code that runs during plugin deactivation.
+ */
+function deactivate_uipress_analytics_bridge() {
+    require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/class-uipress-analytics-bridge-deactivator.php';
+    UIPress_Analytics_Bridge_Deactivator::deactivate();
+}
+
+register_activation_hook(__FILE__, 'activate_uipress_analytics_bridge');
+register_deactivation_hook(__FILE__, 'deactivate_uipress_analytics_bridge');
+
+/**
+ * Debug mode setup function
  */
 function uipress_analytics_bridge_debug_mode() {
-    $advanced_settings = get_option('uipress_analytics_bridge_advanced', array());
+    $advanced_settings = get_option('uip_analytics_bridge_advanced', array());
     
     // Only enable if debug mode is specifically set in options
     if (isset($advanced_settings['debug_mode']) && $advanced_settings['debug_mode']) {
+        // Enable WordPress debug mode
+        if (!defined('WP_DEBUG')) {
+            define('WP_DEBUG', true);
+        }
+        
         // Log errors but don't display them
         if (!defined('WP_DEBUG_LOG')) {
             define('WP_DEBUG_LOG', true);
+        }
+        
+        if (!defined('WP_DEBUG_DISPLAY')) {
+            define('WP_DEBUG_DISPLAY', false);
         }
         
         // Set error reporting level
@@ -71,45 +108,81 @@ function uipress_analytics_bridge_debug_mode() {
 }
 
 /**
- * The code that runs during plugin activation.
+ * Check if UIPress Lite and Pro are active before loading our plugin
  */
-function activate_uipress_analytics_bridge() {
-    require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/class-uipress-analytics-bridge-activator.php';
-    UIPress_Analytics_Bridge_Activator::activate();
+function uipress_analytics_bridge_check_dependencies() {
+    // Using transient for better performance
+    $dependencies_met = get_transient('uipress_analytics_bridge_dependencies_met');
+    
+    if (false === $dependencies_met) {
+        $plugin_messages = array();
+        $plugin_dependencies_met = true;
+        
+        // Check for UIPress Lite
+        if (!defined('uip_plugin_version')) {
+            $plugin_dependencies_met = false;
+            $plugin_messages[] = __('UIPress Lite is required for UIPress Analytics Bridge.', 'uipress-analytics-bridge');
+        }
+        
+        // Check for UIPress Pro
+        if (!defined('uip_pro_plugin_version')) {
+            $plugin_dependencies_met = false;
+            $plugin_messages[] = __('UIPress Pro is required for UIPress Analytics Bridge.', 'uipress-analytics-bridge');
+        }
+        
+        // Store the result in a transient (cache for 1 hour)
+        set_transient('uipress_analytics_bridge_dependencies_met', $plugin_dependencies_met, HOUR_IN_SECONDS);
+        update_option('uipress_analytics_bridge_dependency_messages', $plugin_messages);
+        
+        return $plugin_dependencies_met;
+    }
+    
+    return $dependencies_met;
 }
 
 /**
- * The code that runs during plugin deactivation.
+ * Display admin notice for missing dependencies
  */
-function deactivate_uipress_analytics_bridge() {
-    require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/class-uipress-analytics-bridge-deactivator.php';
-    UIPress_Analytics_Bridge_Deactivator::deactivate();
+function uipress_analytics_bridge_dependency_notice() {
+    $dependency_messages = get_option('uipress_analytics_bridge_dependency_messages', array());
+    
+    if (!empty($dependency_messages)) {
+        echo '<div class="notice notice-error is-dismissible">';
+        echo '<p><strong>' . __('UIPress Analytics Bridge - Missing Dependencies', 'uipress-analytics-bridge') . '</strong></p>';
+        echo '<ul>';
+        
+        foreach ($dependency_messages as $message) {
+            echo '<li>' . esc_html($message) . '</li>';
+        }
+        
+        echo '</ul>';
+        echo '</div>';
+    }
 }
 
-register_activation_hook(__FILE__, 'activate_uipress_analytics_bridge');
-register_deactivation_hook(__FILE__, 'deactivate_uipress_analytics_bridge');
-
 /**
- * The core plugin class that is used to define internationalization,
- * admin-specific hooks, and public-facing site hooks.
- */
-require UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/class-uipress-analytics-bridge.php';
-
-/**
- * Begins execution of the plugin.
- * 
- * Since everything within the plugin is registered via hooks,
- * then kicking off the plugin from this point in the file does
- * not affect the page life cycle.
+ * Begin execution of the plugin.
+ *
+ * This function is called using 'plugins_loaded' hook to ensure
+ * it executes at the correct time within WordPress loading sequence.
  */
 function run_uipress_analytics_bridge() {
-    // Initialize debug mode if needed
+    // Set up debug mode if needed
     uipress_analytics_bridge_debug_mode();
     
-    // Load and run the plugin
+    // Check dependencies
+    if (!uipress_analytics_bridge_check_dependencies()) {
+        add_action('admin_notices', 'uipress_analytics_bridge_dependency_notice');
+        return;
+    }
+    
+    // Required plugin class file
+    require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/class-uipress-analytics-bridge.php';
+    
+    // Execute the plugin
     $plugin = new UIPress_Analytics_Bridge();
     $plugin->run();
 }
 
-// Use plugins_loaded to ensure WordPress is properly initialized
+// Hook into WordPress to run our plugin
 add_action('plugins_loaded', 'run_uipress_analytics_bridge');

@@ -1,7 +1,8 @@
 <?php
 /**
- * WordPress-side authentication handling.
+ * The class responsible for WordPress-side authentication handling.
  *
+ * @since      1.0.0
  * @package    UIPress_Analytics_Bridge
  * @subpackage UIPress_Analytics_Bridge/includes
  */
@@ -14,459 +15,446 @@ if (!defined('ABSPATH')) {
 class UIPress_Analytics_Bridge_Auth {
 
     /**
-     * The API auth handler instance.
+     * The ID of this plugin.
      *
      * @since    1.0.0
      * @access   private
-     * @var      UIPress_Analytics_Bridge_API_Auth    $api_auth    Handles Google API authentication.
+     * @var      string    $plugin_name    The ID of this plugin.
      */
-    private $api_auth;
+    private $plugin_name;
 
     /**
-     * The API data handler instance.
+     * The version of this plugin.
      *
      * @since    1.0.0
      * @access   private
-     * @var      UIPress_Analytics_Bridge_API_Data    $api_data    Handles Google API data retrieval.
+     * @var      string    $version    The current version of this plugin.
      */
-    private $api_data;
+    private $version;
+
+    /**
+     * API Auth instance.
+     *
+     * @since    1.0.0
+     * @access   private
+     * @var      UIPress_Analytics_Bridge_API_Auth    $api_auth    The API auth instance.
+     */
+    private $api_auth;
 
     /**
      * Initialize the class and set its properties.
      *
      * @since    1.0.0
-     * @param    UIPress_Analytics_Bridge_API_Auth    $api_auth    The API auth handler instance.
-     * @param    UIPress_Analytics_Bridge_API_Data    $api_data    The API data handler instance.
+     * @param    string    $plugin_name       The name of this plugin.
+     * @param    string    $version           The version of this plugin.
      */
-    public function __construct($api_auth, $api_data) {
-        $this->api_auth = $api_auth;
-        $this->api_data = $api_data;
+    public function __construct($plugin_name, $version) {
+        $this->plugin_name = $plugin_name;
+        $this->version = $version;
+        $this->api_auth = new UIPress_Analytics_Bridge_API_Auth($plugin_name, $version);
     }
 
     /**
-     * Get the analytics authentication data.
-     *
-     * @since    1.0.0
-     * @param    string    $save_to_user    Whether to save to user preferences.
-     * @return   array     The analytics authentication data.
-     */
-    public function get_analytics_data($save_to_user = 'false') {
-        // Determine where to get the data from based on the saveAccountToUser parameter
-        $use_user_preferences = ($save_to_user === 'true');
-        
-        // Get authentication data from the appropriate location
-        if ($use_user_preferences) {
-            $analytics_data = $this->get_user_analytics_data();
-        } else {
-            $analytics_data = $this->get_site_analytics_data();
-        }
-        
-        // If no data exists, return empty default structure
-        if (empty($analytics_data)) {
-            return array(
-                'view' => '',
-                'code' => '',
-                'token' => '',
-                'measurement_id' => '',
-                'connected' => false,
-            );
-        }
-        
-        // Ensure the connected flag is set
-        if (!isset($analytics_data['connected'])) {
-            $analytics_data['connected'] = !empty($analytics_data['code']) && !empty($analytics_data['view']);
-        }
-        
-        return $analytics_data;
-    }
-
-    /**
-     * Get analytics data from user preferences.
-     *
-     * @since    1.0.0
-     * @return   array    The analytics data from user preferences.
-     */
-    private function get_user_analytics_data() {
-        $user_id = get_current_user_id();
-        $user_prefs = get_user_meta($user_id, 'uip-prefs', true);
-        
-        if (!is_array($user_prefs) || !isset($user_prefs['google_analytics'])) {
-            return $this->get_plugin_auth_data('user');
-        }
-        
-        return $user_prefs['google_analytics'];
-    }
-
-    /**
-     * Get analytics data from site options.
-     *
-     * @since    1.0.0
-     * @return   array    The analytics data from site options.
-     */
-    private function get_site_analytics_data() {
-        $uip_settings = get_option('uip-global-settings');
-        
-        if (!is_array($uip_settings) || !isset($uip_settings['google_analytics'])) {
-            return $this->get_plugin_auth_data('site');
-        }
-        
-        return $uip_settings['google_analytics'];
-    }
-
-    /**
-     * Get authentication data stored by this plugin.
-     *
-     * @since    1.0.0
-     * @param    string    $context    The context ('user' or 'site').
-     * @return   array     The authentication data.
-     */
-    private function get_plugin_auth_data($context = 'site') {
-        if ($context === 'user') {
-            $auth_data = get_user_meta(get_current_user_id(), 'uipress_analytics_bridge_auth', true);
-        } else {
-            $auth_data = get_option('uipress_analytics_bridge_auth');
-        }
-        
-        if (!is_array($auth_data)) {
-            return array();
-        }
-        
-        return $auth_data;
-    }
-
-    /**
-     * Update analytics authentication data.
-     *
-     * @since    1.0.0
-     * @param    array     $data          The authentication data to update.
-     * @param    string    $save_to_user  Whether to save to user preferences.
-     * @return   bool      Whether the update was successful.
-     */
-    public function update_analytics_data($data, $save_to_user = 'false') {
-        // Ensure data is an array
-        if (!is_array($data)) {
-            return false;
-        }
-        
-        // Add connected flag
-        $data['connected'] = !empty($data['code']) && !empty($data['view']);
-        
-        // Determine where to save the data
-        $use_user_preferences = ($save_to_user === 'true');
-        
-        // Save to the appropriate location
-        if ($use_user_preferences) {
-            return $this->update_user_analytics_data($data);
-        } else {
-            return $this->update_site_analytics_data($data);
-        }
-    }
-
-    /**
-     * Update analytics data in user preferences.
-     *
-     * @since    1.0.0
-     * @param    array    $data    The analytics data to update.
-     * @return   bool     Whether the update was successful.
-     */
-    private function update_user_analytics_data($data) {
-        $user_id = get_current_user_id();
-        $user_prefs = get_user_meta($user_id, 'uip-prefs', true);
-        
-        if (!is_array($user_prefs)) {
-            $user_prefs = array();
-        }
-        
-        $user_prefs['google_analytics'] = $data;
-        
-        // Also store in our plugin's user meta for backup
-        update_user_meta($user_id, 'uipress_analytics_bridge_auth', $data);
-        
-        return update_user_meta($user_id, 'uip-prefs', $user_prefs);
-    }
-
-    /**
-     * Update analytics data in site options.
-     *
-     * @since    1.0.0
-     * @param    array    $data    The analytics data to update.
-     * @return   bool     Whether the update was successful.
-     */
-    private function update_site_analytics_data($data) {
-        $uip_settings = get_option('uip-global-settings');
-        
-        if (!is_array($uip_settings)) {
-            $uip_settings = array();
-        }
-        
-        $uip_settings['google_analytics'] = $data;
-        
-        // Also store in our plugin's option for backup
-        update_option('uipress_analytics_bridge_auth', $data);
-        
-        return update_option('uip-global-settings', $uip_settings);
-    }
-
-    /**
-     * Handle the authentication callback from Google OAuth.
-     *
-     * @since    1.0.0
-     */
-    public function handle_auth_callback() {
-        // Verify nonce
-        check_ajax_referer('uipress-analytics-bridge-nonce', 'security');
-        
-        // Get the authorization code from the request
-        $code = isset($_POST['code']) ? sanitize_text_field($_POST['code']) : '';
-        $save_to_user = isset($_POST['saveAccountToUser']) ? sanitize_text_field($_POST['saveAccountToUser']) : 'false';
-        
-        if (empty($code)) {
-            wp_send_json_error(array(
-                'message' => __('Authorization code is missing.', 'uipress-analytics-bridge'),
-            ));
-        }
-        
-        // Exchange the authorization code for access token
-        $token_data = $this->api_auth->exchange_code_for_token($code);
-        
-        if (is_wp_error($token_data)) {
-            wp_send_json_error(array(
-                'message' => $token_data->get_error_message(),
-            ));
-        }
-        
-        // Get the user's analytics properties
-        $properties = $this->api_data->get_analytics_properties($token_data['access_token']);
-        
-        if (is_wp_error($properties)) {
-            wp_send_json_error(array(
-                'message' => $properties->get_error_message(),
-            ));
-        }
-        
-        // Update the authentication data
-        $auth_data = array(
-            'code' => $code,
-            'token' => $token_data['access_token'],
-            'refresh_token' => $token_data['refresh_token'],
-            'token_expires' => time() + $token_data['expires_in'],
-            'properties' => $properties,
-            'view' => isset($properties[0]['id']) ? $properties[0]['id'] : '',
-            'measurement_id' => isset($properties[0]['measurement_id']) ? $properties[0]['measurement_id'] : '',
-            'connected' => true,
-        );
-        
-        $this->update_analytics_data($auth_data, $save_to_user);
-        
-        // Return success response
-        wp_send_json_success(array(
-            'message' => __('Successfully authenticated with Google Analytics.', 'uipress-analytics-bridge'),
-            'properties' => $properties,
-        ));
-    }
-
-    /**
-     * Filter the analytics status option.
-     *
-     * @since    1.0.0
-     * @param    mixed    $value    The value of the option.
-     * @return   mixed    The filtered value.
-     */
-    public function filter_analytics_status($value) {
-        // Check if we have valid analytics data
-        $analytics_data = $this->get_site_analytics_data();
-        
-        if (!empty($analytics_data) && isset($analytics_data['connected']) && $analytics_data['connected']) {
-            return 'connected';
-        }
-        
-        return $value;
-    }
-
-    /**
-     * Intercept the UIPress Pro save_account AJAX action.
+     * Intercept save account AJAX request.
      *
      * @since    1.0.0
      */
     public function intercept_save_account() {
-        // Verify nonce
-        if (!check_ajax_referer('uip-security-nonce', 'security', false)) {
-            wp_send_json(array(
-                'error' => true,
-                'message' => __('Security check failed', 'uipress-analytics-bridge'),
-            ));
+        // Check security nonce and 'DOING_AJAX' global
+        if (!$this->verify_ajax_security()) {
+            return;
         }
-        
-        // Get the analytics data from the request
-        $analytics_data = isset($_POST['analytics']) ? json_decode(stripslashes($_POST['analytics']), true) : array();
+
+        $data = $this->clean_input_with_code(json_decode(stripslashes($_POST['analytics'])));
         $save_to_user = isset($_POST['saveAccountToUser']) ? sanitize_text_field($_POST['saveAccountToUser']) : 'false';
-        
-        if (!is_array($analytics_data)) {
-            wp_send_json(array(
-                'error' => true,
-                'message' => __('Invalid analytics data', 'uipress-analytics-bridge'),
-            ));
+
+        if (!is_object($data)) {
+            $this->send_error_response(__('Incorrect data passed to server', 'uipress-analytics-bridge'));
         }
-        
-        // Clean the analytics data
-        $cleaned_data = array();
-        
-        if (isset($analytics_data['view'])) {
-            $cleaned_data['view'] = sanitize_text_field($analytics_data['view']);
+
+        if (!isset($data->view) || !isset($data->code)) {
+            $this->send_error_response(__('Incorrect data passed to server', 'uipress-analytics-bridge'));
         }
+
+        // Determine if this is a GA4 property (view will be a string starting with G-)
+        $is_ga4 = (isset($data->view) && is_string($data->view) && strpos($data->view, 'G-') === 0);
         
-        if (isset($analytics_data['code'])) {
-            $cleaned_data['code'] = sanitize_text_field($analytics_data['code']);
+        // Build auth data
+        $auth_data = array(
+            'view' => sanitize_text_field($data->view),
+            'code' => sanitize_text_field($data->code),
+            'gafour' => $is_ga4,
+        );
+        
+        // If GA4, add measurement_id
+        if ($is_ga4) {
+            $auth_data['measurement_id'] = sanitize_text_field($data->view);
         }
-        
-        if (isset($analytics_data['measurement_id'])) {
-            $cleaned_data['measurement_id'] = sanitize_text_field($analytics_data['measurement_id']);
+
+        // Save account data
+        $result = $this->save_account_data($auth_data, ($save_to_user === 'true'));
+
+        if (!$result) {
+            $this->send_error_response(__('Failed to save account data', 'uipress-analytics-bridge'));
         }
-        
-        // Update the analytics data
-        $this->update_analytics_data($cleaned_data, $save_to_user);
-        
+
         // Return success response
-        wp_send_json(array(
-            'success' => true,
-        ));
+        wp_send_json(array('success' => true));
     }
 
     /**
-     * Intercept the UIPress Pro save_access_token AJAX action.
+     * Intercept save access token AJAX request.
      *
      * @since    1.0.0
      */
     public function intercept_save_access_token() {
-        // Verify nonce
-        if (!check_ajax_referer('uip-security-nonce', 'security', false)) {
-            wp_send_json(array(
-                'error' => true,
-                'message' => __('Security check failed', 'uipress-analytics-bridge'),
-            ));
+        // Check security nonce and 'DOING_AJAX' global
+        if (!$this->verify_ajax_security()) {
+            return;
         }
-        
-        // Get the token from the request
+
         $token = isset($_POST['token']) ? sanitize_text_field($_POST['token']) : '';
         $save_to_user = isset($_POST['saveAccountToUser']) ? sanitize_text_field($_POST['saveAccountToUser']) : 'false';
-        
-        if (empty($token)) {
-            wp_send_json(array(
-                'error' => true,
-                'message' => __('Token is missing', 'uipress-analytics-bridge'),
-            ));
+
+        if (!$token || $token == '') {
+            $this->send_error_response(__('Incorrect token sent to server', 'uipress-analytics-bridge'));
         }
+
+        // Get existing account data
+        $auth_data = $this->get_account_data(($save_to_user === 'true'));
         
-        // Get the current analytics data
-        $analytics_data = $this->get_analytics_data($save_to_user);
-        
-        // Update the token
-        $analytics_data['token'] = $token;
-        
-        // Update the analytics data
-        $this->update_analytics_data($analytics_data, $save_to_user);
-        
+        if (!is_array($auth_data)) {
+            $auth_data = array();
+        }
+
+        // Update with new token
+        $auth_data['token'] = $token;
+
+        // Save account data
+        $result = $this->save_account_data($auth_data, ($save_to_user === 'true'));
+
+        if (!$result) {
+            $this->send_error_response(__('Failed to save access token', 'uipress-analytics-bridge'));
+        }
+
         // Return success response
-        wp_send_json(array(
-            'success' => true,
-        ));
+        wp_send_json(array('success' => true));
     }
 
     /**
-     * Intercept the UIPress Pro remove_account AJAX action.
+     * Intercept remove account AJAX request.
      *
      * @since    1.0.0
      */
     public function intercept_remove_account() {
-        // Verify nonce
-        if (!check_ajax_referer('uip-security-nonce', 'security', false)) {
-            wp_send_json(array(
-                'error' => true,
-                'message' => __('Security check failed', 'uipress-analytics-bridge'),
-            ));
+        // Check security nonce and 'DOING_AJAX' global
+        if (!$this->verify_ajax_security()) {
+            return;
         }
-        
-        // Get the save_to_user parameter
+
         $save_to_user = isset($_POST['saveAccountToUser']) ? sanitize_text_field($_POST['saveAccountToUser']) : 'false';
+
+        // Get existing account data
+        $auth_data = $this->get_account_data(($save_to_user === 'true'));
         
-        // Get the current analytics data
-        $analytics_data = $this->get_analytics_data($save_to_user);
+        if (!is_array($auth_data)) {
+            $auth_data = array();
+        }
+
+        // Clear account data
+        $auth_data['view'] = false;
+        $auth_data['code'] = false;
+        $auth_data['token'] = false;
+        $auth_data['measurement_id'] = false;
+
+        // Save account data
+        $result = $this->save_account_data($auth_data, ($save_to_user === 'true'));
+
+        if (!$result) {
+            $this->send_error_response(__('Failed to remove account', 'uipress-analytics-bridge'));
+        }
+
+        // Return success response
+        wp_send_json(array('success' => true));
+    }
+
+    /**
+     * Handle OAuth callback.
+     *
+     * @since    1.0.0
+     */
+    public function handle_auth_callback() {
+        // Check security nonce and 'DOING_AJAX' global
+        if (!$this->verify_ajax_security()) {
+            return;
+        }
+
+        $code = isset($_POST['code']) ? sanitize_text_field($_POST['code']) : '';
+        $save_to_user = isset($_POST['saveAccountToUser']) ? sanitize_text_field($_POST['saveAccountToUser']) : 'false';
+        $property_id = isset($_POST['property_id']) ? sanitize_text_field($_POST['property_id']) : '';
+
+        if (!$code || !$property_id) {
+            $this->send_error_response(__('Missing required authorization data', 'uipress-analytics-bridge'));
+        }
+
+        // Exchange code for tokens
+        $tokens = $this->api_auth->exchange_code_for_tokens($code);
+
+        if (!$tokens || isset($tokens['error'])) {
+            $error_message = isset($tokens['error_description']) ? $tokens['error_description'] : __('Failed to authenticate with Google', 'uipress-analytics-bridge');
+            $this->send_error_response($error_message);
+        }
+
+        // Determine if this is a GA4 property
+        $is_ga4 = (strpos($property_id, 'G-') === 0);
         
-        // Remove the authentication data
-        $analytics_data['view'] = false;
-        $analytics_data['code'] = false;
-        $analytics_data['token'] = false;
-        $analytics_data['measurement_id'] = false;
-        $analytics_data['connected'] = false;
+        // Build auth data
+        $auth_data = array(
+            'view' => $property_id,
+            'code' => $code,
+            'token' => $tokens['access_token'],
+            'refresh_token' => $tokens['refresh_token'],
+            'expires' => time() + $tokens['expires_in'],
+            'gafour' => $is_ga4,
+        );
         
-        // Update the analytics data
-        $this->update_analytics_data($analytics_data, $save_to_user);
-        
+        // If GA4, add measurement_id
+        if ($is_ga4) {
+            $auth_data['measurement_id'] = $property_id;
+        }
+
+        // Save account data
+        $result = $this->save_account_data($auth_data, ($save_to_user === 'true'));
+
+        if (!$result) {
+            $this->send_error_response(__('Failed to save authentication data', 'uipress-analytics-bridge'));
+        }
+
         // Return success response
         wp_send_json(array(
             'success' => true,
+            'message' => __('Successfully authenticated with Google Analytics', 'uipress-analytics-bridge'),
+            'data' => array(
+                'is_ga4' => $is_ga4,
+                'property_id' => $property_id
+            )
         ));
     }
 
     /**
-     * Generate the authorization URL for Google OAuth.
+     * Get OAuth URL.
      *
      * @since    1.0.0
-     * @return   string    The authorization URL.
      */
-    public function get_auth_url() {
-        return $this->api_auth->get_auth_url();
+    public function get_oauth_url() {
+        // Check security nonce and 'DOING_AJAX' global
+        if (!$this->verify_ajax_security()) {
+            return;
+        }
+
+        $url = $this->api_auth->get_auth_url();
+        
+        if (!$url) {
+            $this->send_error_response(__('Failed to generate OAuth URL', 'uipress-analytics-bridge'));
+        }
+
+        // Return success response
+        wp_send_json(array(
+            'success' => true,
+            'url' => $url
+        ));
     }
 
     /**
-     * Check if the user is authenticated with Google Analytics.
+     * Filter analytics status.
      *
      * @since    1.0.0
-     * @param    string    $save_to_user    Whether to check user preferences.
-     * @return   bool      Whether the user is authenticated.
+     * @param    mixed    $value    The value to filter.
+     * @return   mixed              The filtered value.
      */
-    public function is_authenticated($save_to_user = 'false') {
-        $analytics_data = $this->get_analytics_data($save_to_user);
+    public function filter_analytics_status($value) {
+        // Check if we have valid authentication
+        $user_auth = $this->get_account_data(true);
+        $global_auth = $this->get_account_data(false);
         
-        return isset($analytics_data['connected']) && $analytics_data['connected'];
-    }
-
-    /**
-     * Get the analytics properties for the authenticated user.
-     *
-     * @since    1.0.0
-     * @param    string    $save_to_user    Whether to check user preferences.
-     * @return   array     The analytics properties.
-     */
-    public function get_analytics_properties($save_to_user = 'false') {
-        $analytics_data = $this->get_analytics_data($save_to_user);
+        $has_user_auth = is_array($user_auth) && isset($user_auth['view']) && $user_auth['view'];
+        $has_global_auth = is_array($global_auth) && isset($global_auth['view']) && $global_auth['view'];
         
-        if (!isset($analytics_data['token']) || empty($analytics_data['token'])) {
-            return array();
+        // If we have a valid auth, return 'active'
+        if ($has_user_auth || $has_global_auth) {
+            return 'active';
         }
         
-        // Check if we need to refresh the token
-        if (isset($analytics_data['token_expires']) && $analytics_data['token_expires'] < time()) {
-            // Refresh the token
-            if (isset($analytics_data['refresh_token'])) {
-                $token_data = $this->api_auth->refresh_access_token($analytics_data['refresh_token']);
-                
-                if (!is_wp_error($token_data)) {
-                    $analytics_data['token'] = $token_data['access_token'];
-                    $analytics_data['token_expires'] = time() + $token_data['expires_in'];
-                    
-                    $this->update_analytics_data($analytics_data, $save_to_user);
-                }
+        // Otherwise, return the original value
+        return $value;
+    }
+
+    /**
+     * Get analytics data.
+     *
+     * @since    1.0.0
+     * @param    bool      $use_user_preferences    Whether to use user preferences or global settings.
+     * @return   array                              The analytics data.
+     */
+    public function get_analytics_data($use_user_preferences = false) {
+        return $this->get_account_data($use_user_preferences);
+    }
+
+    /**
+     * Get account data.
+     *
+     * @since    1.0.0
+     * @param    bool      $use_user_preferences    Whether to use user preferences or global settings.
+     * @return   array                              The account data.
+     */
+    private function get_account_data($use_user_preferences = false) {
+        if ($use_user_preferences) {
+            // Use UserPreferences class if available
+            if (class_exists('UipressLite\Classes\App\UserPreferences')) {
+                return \UipressLite\Classes\App\UserPreferences::get('google_analytics');
+            } else {
+                // Fallback to direct user meta
+                $user_id = get_current_user_id();
+                $user_prefs = get_user_meta($user_id, 'uip-prefs', true);
+                return isset($user_prefs['google_analytics']) ? $user_prefs['google_analytics'] : array();
+            }
+        } else {
+            // Use UipOptions class if available
+            if (class_exists('UipressLite\Classes\App\UipOptions')) {
+                return \UipressLite\Classes\App\UipOptions::get('google_analytics');
+            } else {
+                // Fallback to direct option
+                $options = get_option('uip-global-settings', array());
+                return isset($options['google_analytics']) ? $options['google_analytics'] : array();
             }
         }
-        
-        // Get the properties from the API
-        $properties = $this->api_data->get_analytics_properties($analytics_data['token']);
-        
-        if (is_wp_error($properties)) {
-            return array();
+    }
+
+    /**
+     * Save account data.
+     *
+     * @since    1.0.0
+     * @param    array     $data                    The data to save.
+     * @param    bool      $use_user_preferences    Whether to use user preferences or global settings.
+     * @return   bool                               Whether the save was successful.
+     */
+    private function save_account_data($data, $use_user_preferences = false) {
+        if ($use_user_preferences) {
+            // Use UserPreferences class if available
+            if (class_exists('UipressLite\Classes\App\UserPreferences')) {
+                \UipressLite\Classes\App\UserPreferences::update('google_analytics', $data);
+                return true;
+            } else {
+                // Fallback to direct user meta
+                $user_id = get_current_user_id();
+                $user_prefs = get_user_meta($user_id, 'uip-prefs', true);
+                
+                if (!is_array($user_prefs)) {
+                    $user_prefs = array();
+                }
+                
+                $user_prefs['google_analytics'] = $data;
+                return update_user_meta($user_id, 'uip-prefs', $user_prefs);
+            }
+        } else {
+            // Use UipOptions class if available
+            if (class_exists('UipressLite\Classes\App\UipOptions')) {
+                \UipressLite\Classes\App\UipOptions::update('google_analytics', $data);
+                return true;
+            } else {
+                // Fallback to direct option
+                $options = get_option('uip-global-settings', array());
+                
+                if (!is_array($options)) {
+                    $options = array();
+                }
+                
+                $options['google_analytics'] = $data;
+                return update_option('uip-global-settings', $options);
+            }
+        }
+    }
+
+    /**
+     * Verify Ajax security
+     *
+     * @since    1.0.0
+     * @return   bool    Whether security check passed
+     */
+    private function verify_ajax_security() {
+        // Check if Ajax class exists and use it
+        if (class_exists('UipressLite\Classes\Utils\Ajax')) {
+            try {
+                \UipressLite\Classes\Utils\Ajax::check_referer();
+                return true;
+            } catch (\Exception $e) {
+                $this->send_error_response(__('Security check failed', 'uipress-analytics-bridge'));
+                return false;
+            }
+        } else {
+            // Manual check
+            $doing_ajax = defined('DOING_AJAX') && DOING_AJAX ? true : false;
+            $referer = check_ajax_referer('uip-security-nonce', 'security', false);
+            
+            if (!$doing_ajax || !$referer) {
+                $this->send_error_response(__('Security check failed', 'uipress-analytics-bridge'));
+                return false;
+            }
+            
+            return true;
+        }
+    }
+
+    /**
+     * Send error response
+     *
+     * @since    1.0.0
+     * @param    string    $message    The error message.
+     */
+    private function send_error_response($message) {
+        $returndata = array(
+            'error' => true,
+            'message' => $message
+        );
+        wp_send_json($returndata);
+    }
+
+    /**
+     * Clean input with code
+     *
+     * This is a simplified version of Sanitize::clean_input_with_code()
+     * 
+     * @since    1.0.0
+     * @param    mixed     $input    The input to clean.
+     * @return   mixed               The cleaned input.
+     */
+    private function clean_input_with_code($input) {
+        // If Sanitize class exists, use it
+        if (class_exists('UipressLite\Classes\Utils\Sanitize')) {
+            return \UipressLite\Classes\Utils\Sanitize::clean_input_with_code($input);
         }
         
-        return $properties;
+        // Simple fallback for objects
+        if (is_object($input)) {
+            foreach ($input as $key => $value) {
+                $input->$key = $this->clean_input_with_code($value);
+            }
+            return $input;
+        }
+        
+        // Simple fallback for arrays
+        if (is_array($input)) {
+            foreach ($input as $key => $value) {
+                $input[$key] = $this->clean_input_with_code($value);
+            }
+            return $input;
+        }
+        
+        // Simple fallback for strings
+        if (is_string($input)) {
+            return wp_kses_post($input);
+        }
+        
+        return $input;
     }
 }

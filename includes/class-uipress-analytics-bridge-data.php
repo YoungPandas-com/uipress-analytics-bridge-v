@@ -1,7 +1,8 @@
 <?php
 /**
- * Data handling/formatting for UIPress compatibility.
+ * The class responsible for data handling and formatting.
  *
+ * @since      1.0.0
  * @package    UIPress_Analytics_Bridge
  * @subpackage UIPress_Analytics_Bridge/includes
  */
@@ -14,20 +15,38 @@ if (!defined('ABSPATH')) {
 class UIPress_Analytics_Bridge_Data {
 
     /**
-     * The auth handler instance.
+     * The ID of this plugin.
      *
      * @since    1.0.0
      * @access   private
-     * @var      UIPress_Analytics_Bridge_Auth    $auth    Handles WordPress-side authentication.
+     * @var      string    $plugin_name    The ID of this plugin.
+     */
+    private $plugin_name;
+
+    /**
+     * The version of this plugin.
+     *
+     * @since    1.0.0
+     * @access   private
+     * @var      string    $version    The current version of this plugin.
+     */
+    private $version;
+
+    /**
+     * Auth instance.
+     *
+     * @since    1.0.0
+     * @access   private
+     * @var      UIPress_Analytics_Bridge_Auth    $auth    The auth instance.
      */
     private $auth;
 
     /**
-     * The API data handler instance.
+     * API Data instance.
      *
      * @since    1.0.0
      * @access   private
-     * @var      UIPress_Analytics_Bridge_API_Data    $api_data    Handles Google API data retrieval.
+     * @var      UIPress_Analytics_Bridge_API_Data    $api_data    The API data instance.
      */
     private $api_data;
 
@@ -35,197 +54,61 @@ class UIPress_Analytics_Bridge_Data {
      * Initialize the class and set its properties.
      *
      * @since    1.0.0
-     * @param    UIPress_Analytics_Bridge_Auth       $auth       The auth handler instance.
-     * @param    UIPress_Analytics_Bridge_API_Data   $api_data   The API data handler instance.
+     * @param    string    $plugin_name       The name of this plugin.
+     * @param    string    $version           The version of this plugin.
      */
-    public function __construct($auth, $api_data) {
-        $this->auth = $auth;
-        $this->api_data = $api_data;
+    public function __construct($plugin_name, $version) {
+        $this->plugin_name = $plugin_name;
+        $this->version = $version;
+        $this->auth = new UIPress_Analytics_Bridge_Auth($plugin_name, $version);
+        $this->api_data = new UIPress_Analytics_Bridge_API_Data($plugin_name, $version);
     }
 
     /**
-     * Intercept the UIPress Pro build_query AJAX action.
+     * Intercept build query AJAX request.
      *
      * @since    1.0.0
      */
     public function intercept_build_query() {
-        // Verify nonce
-        if (!check_ajax_referer('uip-security-nonce', 'security', false)) {
-            wp_send_json(array(
-                'error' => true,
-                'message' => __('Security check failed', 'uipress-analytics-bridge'),
-            ));
+        // Check security nonce and 'DOING_AJAX' global
+        if (!$this->verify_ajax_security()) {
+            return;
         }
 
-        // Get required parameters
         $save_to_user = isset($_POST['saveAccountToUser']) ? sanitize_text_field($_POST['saveAccountToUser']) : 'false';
         
         // Get analytics data
-        $analytics_data = $this->auth->get_analytics_data($save_to_user);
+        $analytics_data = $this->auth->get_analytics_data(($save_to_user === 'true'));
         
-        // Check if we have a valid configuration
-        if (empty($analytics_data) || !isset($analytics_data['code']) || !isset($analytics_data['view'])) {
-            $data = get_option('uip_pro', true);
-            
-            wp_send_json(array(
-                'error' => true,
-                'message' => __('You need to connect a Google Analytics account to display data', 'uipress-analytics-bridge'),
-                'error_type' => 'no_google',
-                'url' => false,
-            ));
+        // Check if we have valid analytics data
+        if (!$analytics_data || !isset($analytics_data['view']) || !isset($analytics_data['code'])) {
+            $this->send_error_response(
+                __('You need to connect a Google Analytics account to display data', 'uipress-analytics-bridge'),
+                'no_google'
+            );
         }
         
-        // Format the response to match what UIPress Pro expects
-        $response = array(
+        // Check if we have a license key (UIPress Pro requirement)
+        $uip_pro_data = $this->get_uip_pro_data();
+        
+        if (!$uip_pro_data || !isset($uip_pro_data['key'])) {
+            $this->send_error_response(
+                __('You need a licence key to use analytics blocks', 'uipress-analytics-bridge'),
+                'no_licence'
+            );
+        }
+        
+        // Build the query URL
+        $query_url = $this->build_query_url($analytics_data, $uip_pro_data);
+        
+        // Return the query URL
+        wp_send_json(array(
             'success' => true,
-            'url' => $this->api_data->build_query_url($analytics_data),
-            'connected' => isset($analytics_data['connected']) ? $analytics_data['connected'] : true,
+            'url' => $query_url,
+            'connected' => true,
             'oauth' => true,
-        );
-        
-        // Add measurement ID if available (for GA4)
-        if (isset($analytics_data['measurement_id']) && !empty($analytics_data['measurement_id'])) {
-            $response['measurement_id'] = $analytics_data['measurement_id'];
-        }
-        
-        wp_send_json($response);
-    }
-
-    /**
-     * Filter the analytics data for UIPress compatibility.
-     *
-     * @since    1.0.0
-     * @param    array    $data    The analytics data.
-     * @return   array    The filtered data.
-     */
-    public function filter_analytics_data($data) {
-        // If data is already valid, return it
-        if (is_array($data) && isset($data['success']) && $data['success']) {
-            return $data;
-        }
-        
-        // Get the plugin settings
-        $settings = get_option('uipress_analytics_bridge_settings', array());
-        
-        // Get the analytics data
-        $analytics_data = $this->auth->get_analytics_data();
-        
-        // Get the start and end dates
-        $end_date = date('Y-m-d');
-        $start_date = date('Y-m-d', strtotime('-30 days'));
-        
-        // Override with settings if available
-        if (isset($settings['date_range']) && !empty($settings['date_range'])) {
-            $range = intval($settings['date_range']);
-            $start_date = date('Y-m-d', strtotime("-{$range} days"));
-        }
-        
-        // Check if we have valid authentication data
-        if (!isset($analytics_data['token']) || empty($analytics_data['token']) || 
-            !isset($analytics_data['view']) || empty($analytics_data['view'])) {
-            return $this->api_data->get_default_analytics_data();
-        }
-        
-        // Determine property type (GA4 or UA)
-        $property_type = isset($analytics_data['measurement_id']) && !empty($analytics_data['measurement_id']) ? 'GA4' : 'UA';
-        
-        // Get the analytics data
-        $metrics = 'totalUsers,screenPageViews,sessions';
-        $dimensions = 'date';
-        
-        $result = $this->api_data->get_analytics_data(
-            $analytics_data['view'],
-            $analytics_data['token'],
-            $start_date,
-            $end_date,
-            $metrics,
-            $dimensions,
-            $property_type
-        );
-        
-        // Check for errors
-        if (is_wp_error($result)) {
-            $default_data = $this->api_data->get_default_analytics_data();
-            $default_data['message'] = $result->get_error_message();
-            return $default_data;
-        }
-        
-        // Add top content data
-        $top_content_result = $this->get_top_content_data($analytics_data, $start_date, $end_date, $property_type);
-        if (!is_wp_error($top_content_result) && isset($top_content_result['topContent'])) {
-            $result['topContent'] = $top_content_result['topContent'];
-        }
-        
-        // Add top sources data
-        $top_sources_result = $this->get_top_sources_data($analytics_data, $start_date, $end_date, $property_type);
-        if (!is_wp_error($top_sources_result) && isset($top_sources_result['topSources'])) {
-            $result['topSources'] = $top_sources_result['topSources'];
-        }
-        
-        // Add Google account data
-        $result['google_account'] = array(
-            'view' => $analytics_data['view'],
-            'code' => $analytics_data['code'],
-            'token' => $analytics_data['token'],
-        );
-        
-        // Add property ID and measurement ID
-        $result['property'] = $analytics_data['view'];
-        if (isset($analytics_data['measurement_id']) && !empty($analytics_data['measurement_id'])) {
-            $result['measurement_id'] = $analytics_data['measurement_id'];
-        }
-        
-        return $result;
-    }
-
-    /**
-     * Get top content data.
-     *
-     * @since    1.0.0
-     * @param    array     $analytics_data    The analytics data.
-     * @param    string    $start_date        The start date.
-     * @param    string    $end_date          The end date.
-     * @param    string    $property_type     The property type.
-     * @return   array     The top content data.
-     */
-    private function get_top_content_data($analytics_data, $start_date, $end_date, $property_type) {
-        $metrics = 'totalUsers,screenPageViews,engagementRate';
-        $dimensions = 'pagePath,pageTitle';
-        
-        return $this->api_data->get_analytics_data(
-            $analytics_data['view'],
-            $analytics_data['token'],
-            $start_date,
-            $end_date,
-            $metrics,
-            $dimensions,
-            $property_type
-        );
-    }
-
-    /**
-     * Get top sources data.
-     *
-     * @since    1.0.0
-     * @param    array     $analytics_data    The analytics data.
-     * @param    string    $start_date        The start date.
-     * @param    string    $end_date          The end date.
-     * @param    string    $property_type     The property type.
-     * @return   array     The top sources data.
-     */
-    private function get_top_sources_data($analytics_data, $start_date, $end_date, $property_type) {
-        $metrics = 'sessions,conversions';
-        $dimensions = 'source';
-        
-        return $this->api_data->get_analytics_data(
-            $analytics_data['view'],
-            $analytics_data['token'],
-            $start_date,
-            $end_date,
-            $metrics,
-            $dimensions,
-            $property_type
-        );
+            'measurement_id' => isset($analytics_data['measurement_id']) ? $analytics_data['measurement_id'] : ''
+        ));
     }
 
     /**
@@ -233,134 +116,222 @@ class UIPress_Analytics_Bridge_Data {
      *
      * @since    1.0.0
      */
-    public function get_analytics_data_ajax() {
-        // Verify nonce
-        check_ajax_referer('uipress-analytics-bridge-nonce', 'security');
-        
-        // Get parameters
+    public function get_analytics_data() {
+        // Check security nonce and 'DOING_AJAX' global
+        if (!$this->verify_ajax_security()) {
+            return;
+        }
+
         $save_to_user = isset($_POST['saveAccountToUser']) ? sanitize_text_field($_POST['saveAccountToUser']) : 'false';
-        $start_date = isset($_POST['startDate']) ? sanitize_text_field($_POST['startDate']) : date('Y-m-d', strtotime('-30 days'));
-        $end_date = isset($_POST['endDate']) ? sanitize_text_field($_POST['endDate']) : date('Y-m-d');
+        $date_range = isset($_POST['dateRange']) ? $this->clean_input_with_code($_POST['dateRange']) : array();
+        $metrics = isset($_POST['metrics']) ? $this->clean_input_with_code($_POST['metrics']) : array();
+        $dimensions = isset($_POST['dimensions']) ? $this->clean_input_with_code($_POST['dimensions']) : array();
+        $max_results = isset($_POST['maxResults']) ? intval($_POST['maxResults']) : 10;
         
-        // Get analytics data
-        $analytics_data = $this->auth->get_analytics_data($save_to_user);
+        // Get auth data
+        $auth_data = $this->auth->get_analytics_data(($save_to_user === 'true'));
         
-        // Check if we have valid authentication data
-        if (!isset($analytics_data['token']) || empty($analytics_data['token']) || 
-            !isset($analytics_data['view']) || empty($analytics_data['view'])) {
-            wp_send_json_error(array(
-                'message' => __('Authentication data is missing or invalid.', 'uipress-analytics-bridge'),
-                'data' => $this->api_data->get_default_analytics_data(),
-            ));
-        }
+        // Fetch data from Google Analytics API
+        $analytics_data = $this->api_data->get_analytics_data($auth_data, $date_range, $metrics, $dimensions, $max_results);
         
-        // Determine property type (GA4 or UA)
-        $property_type = isset($analytics_data['measurement_id']) && !empty($analytics_data['measurement_id']) ? 'GA4' : 'UA';
+        // Apply filter for customizations
+        $analytics_data = apply_filters('uip_filter_google_analytics_data', $analytics_data);
         
-        // Get the analytics data
-        $metrics = 'totalUsers,screenPageViews,sessions';
-        $dimensions = 'date';
-        
-        $result = $this->api_data->get_analytics_data(
-            $analytics_data['view'],
-            $analytics_data['token'],
-            $start_date,
-            $end_date,
-            $metrics,
-            $dimensions,
-            $property_type
-        );
-        
-        // Check for errors
-        if (is_wp_error($result)) {
-            wp_send_json_error(array(
-                'message' => $result->get_error_message(),
-                'data' => $this->api_data->get_default_analytics_data(),
-            ));
-        }
-        
-        // Add top content data
-        $top_content_result = $this->get_top_content_data($analytics_data, $start_date, $end_date, $property_type);
-        if (!is_wp_error($top_content_result) && isset($top_content_result['topContent'])) {
-            $result['topContent'] = $top_content_result['topContent'];
-        }
-        
-        // Add top sources data
-        $top_sources_result = $this->get_top_sources_data($analytics_data, $start_date, $end_date, $property_type);
-        if (!is_wp_error($top_sources_result) && isset($top_sources_result['topSources'])) {
-            $result['topSources'] = $top_sources_result['topSources'];
-        }
-        
-        wp_send_json_success($result);
+        // Return data
+        wp_send_json($analytics_data);
     }
 
     /**
-     * Test the analytics connection via AJAX.
+     * Filter analytics data.
      *
      * @since    1.0.0
+     * @param    array    $data    The data to filter.
+     * @return   array             The filtered data.
      */
-    public function test_connection_ajax() {
-        // Verify nonce
-        check_ajax_referer('uipress-analytics-bridge-nonce', 'security');
-        
-        // Get parameters
-        $save_to_user = isset($_POST['saveAccountToUser']) ? sanitize_text_field($_POST['saveAccountToUser']) : 'false';
-        
-        // Get analytics data
-        $analytics_data = $this->auth->get_analytics_data($save_to_user);
-        
-        // Check if we have valid authentication data
-        if (!isset($analytics_data['token']) || empty($analytics_data['token']) || 
-            !isset($analytics_data['view']) || empty($analytics_data['view'])) {
-            wp_send_json_error(array(
-                'message' => __('Authentication data is missing or invalid.', 'uipress-analytics-bridge'),
-                'status' => 'disconnected',
-            ));
-        }
-        
-        // Determine property type (GA4 or UA)
-        $property_type = isset($analytics_data['measurement_id']) && !empty($analytics_data['measurement_id']) ? 'GA4' : 'UA';
-        
-        // Test the connection by fetching minimal data
-        $metrics = 'totalUsers';
-        $dimensions = 'date';
-        $start_date = date('Y-m-d', strtotime('-7 days'));
-        $end_date = date('Y-m-d');
-        
-        $result = $this->api_data->get_analytics_data(
-            $analytics_data['view'],
-            $analytics_data['token'],
-            $start_date,
-            $end_date,
-            $metrics,
-            $dimensions,
-            $property_type
-        );
-        
-        // Check for errors
-        if (is_wp_error($result)) {
-            wp_send_json_error(array(
-                'message' => $result->get_error_message(),
-                'status' => 'error',
-            ));
-        }
-        
-        // Connection is valid
-        wp_send_json_success(array(
-            'message' => __('Successfully connected to Google Analytics.', 'uipress-analytics-bridge'),
-            'status' => 'connected',
-            'property_type' => $property_type,
-            'property_id' => $analytics_data['view'],
-            'measurement_id' => isset($analytics_data['measurement_id']) ? $analytics_data['measurement_id'] : '',
-        ));
+    public function filter_analytics_data($data) {
+        // Add any custom data filtering here
+        return $data;
     }
 
     /**
-     * Clear the analytics data cache.
+     * Build query URL.
      *
      * @since    1.0.0
+     * @param    array    $analytics_data    The analytics data.
+     * @param    array    $uip_pro_data      The UIPress Pro data.
+     * @return   string                      The query URL.
      */
-    public function clear_cache() {
-        $this->api_data->clear_cache();
+    private function build_query_url($analytics_data, $uip_pro_data = null) {
+        // If UIPress Pro data is not provided, try to get it
+        if (!$uip_pro_data) {
+            $uip_pro_data = $this->get_uip_pro_data();
+        }
+        
+        // Get required values
+        $key = isset($uip_pro_data['key']) ? $uip_pro_data['key'] : '';
+        $instance = isset($uip_pro_data['instance']) ? $uip_pro_data['instance'] : '';
+        $code = isset($analytics_data['code']) ? $analytics_data['code'] : '';
+        $view = isset($analytics_data['view']) ? $analytics_data['view'] : '';
+        $token = isset($analytics_data['token']) ? $analytics_data['token'] : '';
+        $domain = get_home_url();
+        
+        // Check if we have all required values
+        if (empty($key) || empty($code) || empty($view)) {
+            return false;
+        }
+        
+        // Build the query URL
+        $query_url = add_query_arg(
+            array(
+                'code' => $code,
+                'view' => $view,
+                'key' => $key,
+                'instance' => $instance,
+                'uip3' => 1,
+                'gafour' => isset($analytics_data['gafour']) && $analytics_data['gafour'] ? 'true' : 'false',
+                'd' => $domain,
+                'uip_token' => $token,
+                'bridge' => 1,
+                'v' => $this->version
+            ),
+            'https://analytics.uipress.co/view.php'
+        );
+        
+        return sanitize_url($query_url);
+    }
+
+    /**
+     * Get UIPress Pro data.
+     *
+     * @since    1.0.0
+     * @return   array    The UIPress Pro data.
+     */
+    private function get_uip_pro_data() {
+        // Try using UipOptions class
+        if (class_exists('UipressLite\Classes\App\UipOptions')) {
+            return \UipressLite\Classes\App\UipOptions::get('uip_pro', true);
+        }
+        
+        // Fallback to direct option
+        $options = get_option('uip-global-settings', array());
+        return isset($options['uip_pro']) ? $options['uip_pro'] : array();
+    }
+
+    /**
+     * Generate default analytics data.
+     *
+     * @since    1.0.0
+     * @return   array    The default analytics data.
+     */
+    public function generate_default_data() {
+        return array(
+            'success' => true,
+            'connected' => false,
+            'data' => array(),
+            'totalStats' => array(
+                'users' => 0,
+                'pageviews' => 0,
+                'sessions' => 0,
+                'change' => array(
+                    'users' => 0,
+                    'pageviews' => 0,
+                    'sessions' => 0
+                )
+            ),
+            'topContent' => array(),
+            'topSources' => array(),
+            'gafour' => true,
+            'message' => __('No data available', 'uipress-analytics-bridge')
+        );
+    }
+
+    /**
+     * Verify Ajax security
+     *
+     * @since    1.0.0
+     * @return   bool    Whether security check passed
+     */
+    private function verify_ajax_security() {
+        // Check if Ajax class exists and use it
+        if (class_exists('UipressLite\Classes\Utils\Ajax')) {
+            try {
+                \UipressLite\Classes\Utils\Ajax::check_referer();
+                return true;
+            } catch (\Exception $e) {
+                $this->send_error_response(__('Security check failed', 'uipress-analytics-bridge'));
+                return false;
+            }
+        } else {
+            // Manual check
+            $doing_ajax = defined('DOING_AJAX') && DOING_AJAX ? true : false;
+            $referer = check_ajax_referer('uip-security-nonce', 'security', false);
+            
+            if (!$doing_ajax || !$referer) {
+                $this->send_error_response(__('Security check failed', 'uipress-analytics-bridge'));
+                return false;
+            }
+            
+            return true;
+        }
+    }
+
+    /**
+     * Send error response
+     *
+     * @since    1.0.0
+     * @param    string    $message     The error message.
+     * @param    string    $error_type  The error type.
+     */
+    private function send_error_response($message, $error_type = '') {
+        $returndata = array(
+            'error' => true,
+            'message' => $message,
+            'url' => false
+        );
+        
+        if (!empty($error_type)) {
+            $returndata['error_type'] = $error_type;
+        }
+        
+        wp_send_json($returndata);
+    }
+
+    /**
+     * Clean input with code
+     *
+     * This is a simplified version of Sanitize::clean_input_with_code()
+     * 
+     * @since    1.0.0
+     * @param    mixed     $input    The input to clean.
+     * @return   mixed               The cleaned input.
+     */
+    private function clean_input_with_code($input) {
+        // If Sanitize class exists, use it
+        if (class_exists('UipressLite\Classes\Utils\Sanitize')) {
+            return \UipressLite\Classes\Utils\Sanitize::clean_input_with_code($input);
+        }
+        
+        // Simple fallback for objects
+        if (is_object($input)) {
+            foreach ($input as $key => $value) {
+                $input->$key = $this->clean_input_with_code($value);
+            }
+            return $input;
+        }
+        
+        // Simple fallback for arrays
+        if (is_array($input)) {
+            foreach ($input as $key => $value) {
+                $input[$key] = $this->clean_input_with_code($value);
+            }
+            return $input;
+        }
+        
+        // Simple fallback for strings
+        if (is_string($input)) {
+            return wp_kses_post($input);
+        }
+        
+        return $input;
     }
 }

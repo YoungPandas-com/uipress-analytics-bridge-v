@@ -2,6 +2,9 @@
 /**
  * Fired during plugin activation.
  *
+ * This class defines all code necessary to run during the plugin's activation.
+ *
+ * @since      1.0.0
  * @package    UIPress_Analytics_Bridge
  * @subpackage UIPress_Analytics_Bridge/includes
  */
@@ -14,62 +17,46 @@ if (!defined('ABSPATH')) {
 class UIPress_Analytics_Bridge_Activator {
 
     /**
-     * Initialize default settings on plugin activation.
+     * Initialize default settings during activation.
      *
      * @since    1.0.0
      */
     public static function activate() {
-        // Set default settings if they don't exist
+        // Create default settings if they don't exist
         if (!get_option('uipress_analytics_bridge_settings')) {
-            update_option('uipress_analytics_bridge_settings', array(
+            $default_settings = array(
                 'client_id' => '',
                 'client_secret' => '',
-                'date_range' => '30',
-            ));
+                'cache_duration' => 60, // 60 minutes default cache
+                'remove_data_on_uninstall' => false,
+            );
+            
+            update_option('uipress_analytics_bridge_settings', $default_settings);
         }
         
-        // Set default advanced settings if they don't exist
+        // Create default advanced settings if they don't exist
         if (!get_option('uipress_analytics_bridge_advanced')) {
-            update_option('uipress_analytics_bridge_advanced', array(
-                'cache_expiration' => '3600',
+            $default_advanced = array(
                 'debug_mode' => false,
-            ));
+                'compatibility_mode' => false,
+                'clear_cache_cron' => true,
+            );
+            
+            update_option('uipress_analytics_bridge_advanced', $default_advanced);
         }
         
-        // Clear any existing cache on activation
-        self::clear_cache();
+        // Set up cron job for cache clearing
+        if (!wp_next_scheduled('uipress_analytics_bridge_clear_cache')) {
+            wp_schedule_event(time(), 'daily', 'uipress_analytics_bridge_clear_cache');
+        }
         
-        // Check for UIPress Lite and Pro
-        self::check_uipress();
-    }
-
-    /**
-     * Clear the analytics data cache.
-     *
-     * @since    1.0.0
-     */
-    private static function clear_cache() {
-        global $wpdb;
+        // Ensure transient option exists for UIPress detection
+        set_transient('uipress_analytics_bridge_dependencies_met', false, HOUR_IN_SECONDS);
         
-        $wpdb->query("DELETE FROM {$wpdb->options} WHERE option_name LIKE '%_transient_uipress_analytics_%'");
-        $wpdb->query("DELETE FROM {$wpdb->options} WHERE option_name LIKE '%_transient_timeout_uipress_analytics_%'");
-    }
-
-    /**
-     * Check for UIPress Lite and Pro on activation.
-     *
-     * @since    1.0.0
-     */
-    private static function check_uipress() {
-        $uipress_lite_active = defined('uip_plugin_version');
-        $uipress_pro_active = defined('uip_pro_plugin_version');
+        // Create notice about configuration
+        set_transient('uipress_analytics_bridge_activation_notice', true, 30 * DAY_IN_SECONDS);
         
-        // Store the status in a transient for quick access
-        set_transient('uipress_analytics_bridge_detection', array(
-            'lite_active' => $uipress_lite_active,
-            'pro_active' => $uipress_pro_active,
-            'lite_version' => $uipress_lite_active ? uip_plugin_version : null,
-            'pro_version' => $uipress_pro_active ? uip_pro_plugin_version : null,
-        ), DAY_IN_SECONDS);
+        // Flush rewrite rules
+        flush_rewrite_rules();
     }
 }

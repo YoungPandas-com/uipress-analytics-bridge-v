@@ -1,7 +1,8 @@
 <?php
 /**
- * Class responsible for detecting UIPress installation.
+ * The class responsible for detecting UIPress installation.
  *
+ * @since      1.0.0
  * @package    UIPress_Analytics_Bridge
  * @subpackage UIPress_Analytics_Bridge/includes
  */
@@ -14,226 +15,171 @@ if (!defined('ABSPATH')) {
 class UIPress_Analytics_Bridge_Detector {
 
     /**
-     * UIPress Lite detection status.
+     * The ID of this plugin.
      *
      * @since    1.0.0
      * @access   private
-     * @var      bool    $uipress_lite_active    Whether UIPress Lite is active.
+     * @var      string    $plugin_name    The ID of this plugin.
      */
-    private $uipress_lite_active = false;
+    private $plugin_name;
 
     /**
-     * UIPress Pro detection status.
+     * The version of this plugin.
      *
      * @since    1.0.0
      * @access   private
-     * @var      bool    $uipress_pro_active    Whether UIPress Pro is active.
+     * @var      string    $version    The current version of this plugin.
      */
-    private $uipress_pro_active = false;
-
-    /**
-     * UIPress Lite version.
-     *
-     * @since    1.0.0
-     * @access   private
-     * @var      string    $uipress_lite_version    The UIPress Lite version.
-     */
-    private $uipress_lite_version = null;
-
-    /**
-     * UIPress Pro version.
-     *
-     * @since    1.0.0
-     * @access   private
-     * @var      string    $uipress_pro_version    The UIPress Pro version.
-     */
-    private $uipress_pro_version = null;
+    private $version;
 
     /**
      * Initialize the class and set its properties.
      *
      * @since    1.0.0
+     * @param    string    $plugin_name       The name of this plugin.
+     * @param    string    $version           The version of this plugin.
      */
-    public function __construct() {
-        // Defer UIPress detection to admin_init hook
+    public function __construct($plugin_name, $version) {
+        $this->plugin_name = $plugin_name;
+        $this->version = $version;
     }
 
     /**
-     * Check for UIPress installation.
+     * Check if UIPress is active and compatible.
      *
      * @since    1.0.0
+     * @return   bool      Returns true if UIPress is active and compatible.
      */
-    public function check_uipress() {
-        // Check for UIPress Lite
-        if (defined('uip_plugin_version')) {
-            $this->uipress_lite_active = true;
-            $this->uipress_lite_version = uip_plugin_version;
+    public function is_uipress_active() {
+        // Check if UIPress Lite exists and is activated
+        if (!defined('uip_plugin_version')) {
+            $this->add_admin_notice(
+                'error',
+                __('UIPress Analytics Bridge requires UIPress Lite to be installed and activated.', 'uipress-analytics-bridge')
+            );
+            return false;
         }
-
-        // Check for UIPress Pro
-        if (defined('uip_pro_plugin_version')) {
-            $this->uipress_pro_active = true;
-            $this->uipress_pro_version = uip_pro_plugin_version;
-        }
-
-        // Store detection results in transient for quick access
-        set_transient('uipress_analytics_bridge_detection', array(
-            'lite_active' => $this->uipress_lite_active,
-            'pro_active' => $this->uipress_pro_active,
-            'lite_version' => $this->uipress_lite_version,
-            'pro_version' => $this->uipress_pro_version,
-        ), DAY_IN_SECONDS);
-
-        // Add admin notice if UIPress Pro is not active
-        if (!$this->uipress_pro_active) {
-            add_action('admin_notices', array($this, 'uipress_pro_missing_notice'));
-        }
-    }
-
-    /**
-     * Display admin notice if UIPress Pro is not active.
-     *
-     * @since    1.0.0
-     */
-    public function uipress_pro_missing_notice() {
-        if (!current_user_can('manage_options')) {
-            return;
-        }
-
-        ?>
-        <div class="notice notice-warning is-dismissible">
-            <p><?php _e('UIPress Analytics Bridge requires UIPress Pro to be installed and activated for full functionality.', 'uipress-analytics-bridge'); ?></p>
-        </div>
-        <?php
-    }
-
-    /**
-     * Check if UIPress Lite is active.
-     *
-     * @since    1.0.0
-     * @return   bool    Whether UIPress Lite is active.
-     */
-    public function is_uipress_lite_active() {
-        return $this->uipress_lite_active;
-    }
-
-    /**
-     * Check if UIPress Pro is active.
-     *
-     * @since    1.0.0
-     * @return   bool    Whether UIPress Pro is active.
-     */
-    public function is_uipress_pro_active() {
-        return $this->uipress_pro_active;
-    }
-
-    /**
-     * Get UIPress Lite version.
-     *
-     * @since    1.0.0
-     * @return   string|null    The UIPress Lite version, or null if not active.
-     */
-    public function get_uipress_lite_version() {
-        return $this->uipress_lite_version;
-    }
-
-    /**
-     * Get UIPress Pro version.
-     *
-     * @since    1.0.0
-     * @return   string|null    The UIPress Pro version, or null if not active.
-     */
-    public function get_uipress_pro_version() {
-        return $this->uipress_pro_version;
-    }
-
-    /**
-     * Check if UIPress integration is possible.
-     *
-     * @since    1.0.0
-     * @return   bool    Whether UIPress integration is possible.
-     */
-    public function is_uipress_integration_possible() {
-        return $this->uipress_lite_active && $this->uipress_pro_active;
-    }
-
-    /**
-     * Verify UIPress has the required hooks.
-     *
-     * @since    1.0.0
-     * @return   array    Status of required hooks.
-     */
-    public function verify_uipress_hooks() {
-        $hooks_status = array(
-            'wp_ajax_uip_build_google_analytics_query' => false,
-            'wp_ajax_uip_save_google_analytics' => false,
-            'wp_ajax_uip_save_access_token' => false,
-            'wp_ajax_uip_remove_analytics_account' => false,
-        );
-
-        global $wp_filter;
-
-        foreach (array_keys($hooks_status) as $hook) {
-            $hook_name = str_replace('wp_ajax_', 'wp_ajax_nopriv_', $hook);
-            if (isset($wp_filter[$hook]) || isset($wp_filter[$hook_name])) {
-                $hooks_status[$hook] = true;
-            }
-        }
-
-        return $hooks_status;
-    }
-
-    /**
-     * Check if specific UIPress options exist.
-     *
-     * @since    1.0.0
-     * @return   array    Status of required options.
-     */
-    public function check_uipress_options() {
-        $options_status = array(
-            'uip_google_analytics' => false,
-            'uip_google_analytics_status' => false,
-        );
-
-        // Check if options exist in wp_options table
-        global $wpdb;
         
-        foreach (array_keys($options_status) as $option) {
-            $result = $wpdb->get_var($wpdb->prepare(
-                "SELECT option_id FROM {$wpdb->options} WHERE option_name = %s LIMIT 1",
-                $option
-            ));
-            
-            $options_status[$option] = ($result !== null);
+        // Check if UIPress Pro exists and is activated
+        if (!defined('uip_pro_plugin_version')) {
+            $this->add_admin_notice(
+                'error',
+                __('UIPress Analytics Bridge requires UIPress Pro to be installed and activated.', 'uipress-analytics-bridge')
+            );
+            return false;
         }
-
-        // Check if options exist as part of UIPress global settings
-        $uip_settings = get_option('uip-global-settings');
-        if (is_array($uip_settings)) {
-            if (isset($uip_settings['google_analytics'])) {
-                $options_status['uip_google_analytics'] = true;
-            }
+        
+        // Check UIPress Lite version compatibility
+        if (version_compare(uip_plugin_version, '3.0.0', '<')) {
+            $this->add_admin_notice(
+                'error',
+                sprintf(
+                    __('UIPress Analytics Bridge requires UIPress Lite version 3.0.0 or higher. You are using version %s.', 'uipress-analytics-bridge'),
+                    uip_plugin_version
+                )
+            );
+            return false;
         }
-
-        return $options_status;
+        
+        // Check UIPress Pro version compatibility
+        if (version_compare(uip_pro_plugin_version, '3.0.0', '<')) {
+            $this->add_admin_notice(
+                'error',
+                sprintf(
+                    __('UIPress Analytics Bridge requires UIPress Pro version 3.0.0 or higher. You are using version %s.', 'uipress-analytics-bridge'),
+                    uip_pro_plugin_version
+                )
+            );
+            return false;
+        }
+        
+        return true;
     }
-
+    
     /**
-     * Get detailed diagnostic information for troubleshooting.
+     * Check if specific UIPress features are available.
      *
      * @since    1.0.0
-     * @return   array    Diagnostic information.
+     * @return   array     Returns an array of available UIPress features.
      */
-    public function get_diagnostics() {
-        return array(
-            'uipress_lite_active' => $this->uipress_lite_active,
-            'uipress_pro_active' => $this->uipress_pro_active,
-            'uipress_lite_version' => $this->uipress_lite_version,
-            'uipress_pro_version' => $this->uipress_pro_version,
-            'hooks_status' => $this->verify_uipress_hooks(),
-            'options_status' => $this->check_uipress_options(),
-            'wp_version' => get_bloginfo('version'),
-            'php_version' => phpversion(),
+    public function get_uipress_features() {
+        $features = array(
+            'google_analytics' => false,
+            'admin_menus' => false,
         );
+        
+        // Check for Google Analytics integration
+        if (class_exists('UipressPro\Classes\Blocks\GoogleAnalytics')) {
+            $features['google_analytics'] = true;
+        }
+        
+        // Check for Admin Menus feature
+        if (class_exists('UipressPro\Classes\PostTypes\AdminMenus')) {
+            $features['admin_menus'] = true;
+        }
+        
+        return $features;
+    }
+    
+    /**
+     * Add admin notice
+     *
+     * @since    1.0.0
+     * @param    string    $type              The type of notice (error, warning, success, info).
+     * @param    string    $message           The message to display.
+     * @param    bool      $is_dismissible    Whether the notice should be dismissible.
+     */
+    private function add_admin_notice($type, $message, $is_dismissible = true) {
+        add_action('admin_notices', function() use ($type, $message, $is_dismissible) {
+            $class = 'notice notice-' . $type;
+            if ($is_dismissible) {
+                $class .= ' is-dismissible';
+            }
+            
+            printf('<div class="%1$s"><p>%2$s</p></div>', esc_attr($class), $message);
+        });
+    }
+    
+    /**
+     * Get UIPress class paths
+     *
+     * @since    1.0.0
+     * @return   array     Returns an array of UIPress class paths.
+     */
+    public function get_uipress_class_paths() {
+        $paths = array(
+            'google_analytics' => false,
+            'ajax_utils' => false,
+            'sanitize_utils' => false,
+            'user_preferences' => false,
+            'uip_options' => false,
+        );
+        
+        // Check for GoogleAnalytics class
+        if (class_exists('UipressPro\Classes\Blocks\GoogleAnalytics')) {
+            $paths['google_analytics'] = 'UipressPro\Classes\Blocks\GoogleAnalytics';
+        }
+        
+        // Check for Ajax utils
+        if (class_exists('UipressLite\Classes\Utils\Ajax')) {
+            $paths['ajax_utils'] = 'UipressLite\Classes\Utils\Ajax';
+        }
+        
+        // Check for Sanitize utils
+        if (class_exists('UipressLite\Classes\Utils\Sanitize')) {
+            $paths['sanitize_utils'] = 'UipressLite\Classes\Utils\Sanitize';
+        }
+        
+        // Check for UserPreferences
+        if (class_exists('UipressLite\Classes\App\UserPreferences')) {
+            $paths['user_preferences'] = 'UipressLite\Classes\App\UserPreferences';
+        }
+        
+        // Check for UipOptions
+        if (class_exists('UipressLite\Classes\App\UipOptions')) {
+            $paths['uip_options'] = 'UipressLite\Classes\App\UipOptions';
+        }
+        
+        return $paths;
     }
 }

@@ -5,6 +5,7 @@
  * This is used to define internationalization, admin-specific hooks, and
  * public-facing site hooks.
  *
+ * @since      1.0.0
  * @package    UIPress_Analytics_Bridge
  * @subpackage UIPress_Analytics_Bridge/includes
  */
@@ -17,12 +18,11 @@ if (!defined('ABSPATH')) {
 class UIPress_Analytics_Bridge {
 
     /**
-     * The loader that's responsible for maintaining and registering all hooks that power
-     * the plugin.
+     * The loader that's responsible for maintaining and registering all hooks.
      *
      * @since    1.0.0
      * @access   protected
-     * @var      UIPress_Analytics_Bridge_Loader    $loader    Maintains and registers all hooks for the plugin.
+     * @var      UIPress_Analytics_Bridge_Loader    $loader    Maintains and registers all hooks.
      */
     protected $loader;
 
@@ -45,86 +45,111 @@ class UIPress_Analytics_Bridge {
     protected $version;
 
     /**
-     * The UIPress detector instance.
-     *
-     * @since    1.0.0
-     * @access   protected
-     * @var      UIPress_Analytics_Bridge_Detector    $detector    Detects UIPress installation.
-     */
-    protected $detector;
-
-    /**
-     * The auth handler instance.
-     *
-     * @since    1.0.0
-     * @access   protected
-     * @var      UIPress_Analytics_Bridge_Auth    $auth    Handles WordPress-side authentication.
-     */
-    protected $auth;
-
-    /**
-     * The data handler instance.
-     *
-     * @since    1.0.0
-     * @access   protected
-     * @var      UIPress_Analytics_Bridge_Data    $data    Handles data formatting.
-     */
-    protected $data;
-
-    /**
      * Define the core functionality of the plugin.
+     *
+     * Set the plugin name and the plugin version that can be used throughout the plugin.
+     * Load the dependencies, define the locale, and set the hooks.
      *
      * @since    1.0.0
      */
     public function __construct() {
         $this->version = UIPRESS_ANALYTICS_BRIDGE_VERSION;
-        $this->plugin_name = UIPRESS_ANALYTICS_BRIDGE_PLUGIN_NAME;
-        
+        $this->plugin_name = 'uipress-analytics-bridge';
+
         $this->load_dependencies();
         $this->set_locale();
-        $this->initialize_components();
-        $this->define_admin_hooks();
-        $this->define_ajax_hooks();
-        $this->define_filter_hooks();
+        
+        // Initialize components only when WordPress is ready (init hook)
+        add_action('init', array($this, 'init_components'), 0);
     }
 
     /**
      * Load the required dependencies for this plugin.
      *
+     * Include the following files that make up the plugin:
+     *
+     * - UIPress_Analytics_Bridge_Loader. Orchestrates the hooks of the plugin.
+     * - UIPress_Analytics_Bridge_i18n. Defines internationalization functionality.
+     * - UIPress_Analytics_Bridge_Detector. Handles UIPress detection.
+     *
+     * Create an instance of the loader which will be used to register the hooks with WordPress.
+     *
      * @since    1.0.0
      * @access   private
      */
     private function load_dependencies() {
-        // The class responsible for orchestrating the actions and filters of the core plugin.
+        /**
+         * The class responsible for orchestrating the actions and filters.
+         */
         require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/class-uipress-analytics-bridge-loader.php';
 
-        // The class responsible for defining internationalization functionality.
+        /**
+         * The class responsible for defining internationalization functionality.
+         */
         require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/class-uipress-analytics-bridge-i18n.php';
 
-        // The class responsible for detecting UIPress installation.
+        /**
+         * The class responsible for detecting UIPress installation.
+         */
         require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/class-uipress-analytics-bridge-detector.php';
 
-        // The class responsible for WordPress-side authentication handling.
-        require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/class-uipress-analytics-bridge-auth.php';
+        /**
+         * The class responsible for activation functionality.
+         */
+        require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/class-uipress-analytics-bridge-activator.php';
+        
+        /**
+         * The class responsible for deactivation functionality.
+         */
+        require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/class-uipress-analytics-bridge-deactivator.php';
 
-        // The class responsible for data handling/formatting.
-        require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/class-uipress-analytics-bridge-data.php';
-
-        // The class responsible for Google API authentication.
-        require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/api/class-uipress-analytics-bridge-api-auth.php';
-
-        // The class responsible for Google API data retrieval.
-        require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/api/class-uipress-analytics-bridge-api-data.php';
-
-        // The class responsible for admin-specific functionality.
-        require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'admin/class-uipress-analytics-bridge-admin.php';
-
-        // Create the loader that will be used to register hooks with WordPress.
+        // Create the loader that will be used to register all hooks
         $this->loader = new UIPress_Analytics_Bridge_Loader();
     }
 
     /**
+     * Initialize components when WordPress is fully initialized
+     * 
+     * @since    1.0.0
+     * @access   public
+     */
+    public function init_components() {
+        /**
+         * The class responsible for authentication handling.
+         */
+        require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/class-uipress-analytics-bridge-auth.php';
+
+        /**
+         * The class responsible for data formatting.
+         */
+        require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/class-uipress-analytics-bridge-data.php';
+
+        /**
+         * The class responsible for Google API authentication.
+         */
+        require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/api/class-uipress-analytics-bridge-api-auth.php';
+
+        /**
+         * The class responsible for Google API data retrieval.
+         */
+        require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/api/class-uipress-analytics-bridge-api-data.php';
+
+        /**
+         * The class responsible for admin-specific functionality.
+         */
+        require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'admin/class-uipress-analytics-bridge-admin.php';
+
+        // Initialize and register hooks for each component
+        $this->define_admin_hooks();
+        $this->define_auth_hooks();
+        $this->define_data_hooks();
+    }
+
+    /**
      * Define the locale for this plugin for internationalization.
+     *
+     * Uses the UIPress_Analytics_Bridge_i18n class in order to set the domain and to register the hook
+     * with WordPress.
      *
      * @since    1.0.0
      * @access   private
@@ -135,96 +160,75 @@ class UIPress_Analytics_Bridge {
     }
 
     /**
-     * Initialize plugin components.
-     *
-     * @since    1.0.0
-     * @access   private
-     */
-    private function initialize_components() {
-        // Initialize the UIPress detector.
-        $this->detector = new UIPress_Analytics_Bridge_Detector();
-        
-        // Initialize the API auth handler
-        $api_auth = new UIPress_Analytics_Bridge_API_Auth();
-        
-        // Initialize the API data handler
-        $api_data = new UIPress_Analytics_Bridge_API_Data($api_auth);
-        
-        // Initialize the auth handler.
-        $this->auth = new UIPress_Analytics_Bridge_Auth($api_auth, $api_data);
-        
-        // Initialize the data handler.
-        $this->data = new UIPress_Analytics_Bridge_Data($this->auth, $api_data);
-    }
-
-    /**
      * Register all of the hooks related to the admin area functionality.
      *
      * @since    1.0.0
      * @access   private
      */
     private function define_admin_hooks() {
-        $plugin_admin = new UIPress_Analytics_Bridge_Admin($this->get_plugin_name(), $this->get_version(), $this->auth, $this->data, $this->detector);
+        $plugin_admin = new UIPress_Analytics_Bridge_Admin($this->get_plugin_name(), $this->get_version());
 
-        // Admin menu and settings page
-        $this->loader->add_action('admin_menu', $plugin_admin, 'add_options_page');
-        $this->loader->add_action('admin_init', $plugin_admin, 'register_settings');
-        
-        // Admin assets
         $this->loader->add_action('admin_enqueue_scripts', $plugin_admin, 'enqueue_styles');
         $this->loader->add_action('admin_enqueue_scripts', $plugin_admin, 'enqueue_scripts');
-        
-        // Admin notices
-        $this->loader->add_action('admin_notices', $plugin_admin, 'admin_notices');
-        
-        // Check UIPress existence
-        $this->loader->add_action('admin_init', $this->detector, 'check_uipress');
+        $this->loader->add_action('admin_menu', $plugin_admin, 'add_settings_page');
+        $this->loader->add_action('admin_init', $plugin_admin, 'register_settings');
+        $this->loader->add_filter('plugin_action_links_' . UIPRESS_ANALYTICS_BRIDGE_PLUGIN_BASENAME, $plugin_admin, 'add_action_links');
     }
 
     /**
-     * Register all of the AJAX hooks.
+     * Register all of the hooks related to authentication.
      *
      * @since    1.0.0
      * @access   private
      */
-    private function define_ajax_hooks() {
-        // Intercept UIPress Pro AJAX actions
-        $this->loader->add_action('wp_ajax_uip_build_google_analytics_query', $this->data, 'intercept_build_query');
-        $this->loader->add_action('wp_ajax_uip_save_google_analytics', $this->auth, 'intercept_save_account');
-        $this->loader->add_action('wp_ajax_uip_save_access_token', $this->auth, 'intercept_save_access_token');
-        $this->loader->add_action('wp_ajax_uip_remove_analytics_account', $this->auth, 'intercept_remove_account');
+    private function define_auth_hooks() {
+        $plugin_auth = new UIPress_Analytics_Bridge_Auth($this->get_plugin_name(), $this->get_version());
         
-        // Plugin's own AJAX actions
-        $this->loader->add_action('wp_ajax_uipress_analytics_bridge_auth', $this->auth, 'handle_auth_callback');
-        $this->loader->add_action('wp_ajax_uipress_analytics_bridge_get_analytics', $this->data, 'get_analytics_data_ajax');
-        $this->loader->add_action('wp_ajax_uipress_analytics_bridge_test_connection', $this->data, 'test_connection_ajax');
+        // Register AJAX handlers for authentication
+        $this->loader->add_action('wp_ajax_uip_save_google_analytics', $plugin_auth, 'intercept_save_account');
+        $this->loader->add_action('wp_ajax_uip_save_access_token', $plugin_auth, 'intercept_save_access_token');
+        $this->loader->add_action('wp_ajax_uip_remove_analytics_account', $plugin_auth, 'intercept_remove_account');
+        
+        // Add our own AJAX actions
+        $this->loader->add_action('wp_ajax_uipress_analytics_bridge_auth', $plugin_auth, 'handle_auth_callback');
+        $this->loader->add_action('wp_ajax_uipress_analytics_bridge_oauth_url', $plugin_auth, 'get_oauth_url');
+        
+        // Custom filter for authentication status
+        $this->loader->add_filter('pre_option_uip_google_analytics_status', $plugin_auth, 'filter_analytics_status', 10, 1);
     }
 
     /**
-     * Register all of the filter hooks.
+     * Register all of the hooks related to data formatting and retrieval.
      *
      * @since    1.0.0
      * @access   private
      */
-    private function define_filter_hooks() {
-        // Apply filter to UIPress analytics data
-        $this->loader->add_filter('uip_filter_google_analytics_data', $this->data, 'filter_analytics_data', 10, 1);
+    private function define_data_hooks() {
+        $plugin_data = new UIPress_Analytics_Bridge_Data($this->get_plugin_name(), $this->get_version());
         
-        // Override UIPress analytics status option
-        $this->loader->add_filter('pre_option_uip_google_analytics_status', $this->auth, 'filter_analytics_status', 10, 1);
+        // Intercept UIPress analytics query building
+        $this->loader->add_action('wp_ajax_uip_build_google_analytics_query', $plugin_data, 'intercept_build_query');
         
-        // Plugin settings link
-        $plugin_admin = new UIPress_Analytics_Bridge_Admin($this->get_plugin_name(), $this->get_version(), $this->auth, $this->data, $this->detector);
-        $this->loader->add_filter('plugin_action_links_' . UIPRESS_ANALYTICS_BRIDGE_PLUGIN_BASENAME, $plugin_admin, 'plugin_action_links');
+        // Add our own AJAX actions for data retrieval
+        $this->loader->add_action('wp_ajax_uipress_analytics_bridge_get_data', $plugin_data, 'get_analytics_data');
+        
+        // Add filter for modifying analytics data
+        $this->loader->add_filter('uip_filter_google_analytics_data', $plugin_data, 'filter_analytics_data', 10, 1);
     }
 
     /**
-     * Run the loader to execute all of the hooks with WordPress.
+     * Run the loader to execute all the hooks with WordPress.
      *
      * @since    1.0.0
      */
     public function run() {
-        $this->loader->run();
+        // Initialize the detector
+        $detector = new UIPress_Analytics_Bridge_Detector($this->get_plugin_name(), $this->get_version());
+        
+        // Only continue if the detector finds UIPress is active
+        if ($detector->is_uipress_active()) {
+            $this->loader->run();
+        }
     }
 
     /**
@@ -256,35 +260,5 @@ class UIPress_Analytics_Bridge {
      */
     public function get_version() {
         return $this->version;
-    }
-
-    /**
-     * Get the auth handler instance.
-     *
-     * @since     1.0.0
-     * @return    UIPress_Analytics_Bridge_Auth    The auth handler instance.
-     */
-    public function get_auth() {
-        return $this->auth;
-    }
-
-    /**
-     * Get the data handler instance.
-     *
-     * @since     1.0.0
-     * @return    UIPress_Analytics_Bridge_Data    The data handler instance.
-     */
-    public function get_data() {
-        return $this->data;
-    }
-
-    /**
-     * Get the UIPress detector instance.
-     *
-     * @since     1.0.0
-     * @return    UIPress_Analytics_Bridge_Detector    The UIPress detector instance.
-     */
-    public function get_detector() {
-        return $this->detector;
     }
 }

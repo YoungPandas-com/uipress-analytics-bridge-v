@@ -891,28 +891,55 @@ class UIPress_Analytics_Bridge_Admin {
                             account_id: accountId
                         },
                         success: function(response) {
+                            console.log('Properties response:', response); // Debug: log the full response
+                            
                             $('#ga-property').prop('disabled', false);
                             
-                            if (response.success && response.data.properties.length > 0) {
-                                var options = '<option value=""><?php _e('-- Select Property --', 'uipress-analytics-bridge'); ?></option>';
-                                
-                                $.each(response.data.properties, function(i, property) {
-                                    // Don't add type to display name - it's already included in data-type
-                                    options += '<option value="' + property.id + '" ' + 
-                                              'data-type="' + property.type + '" ' + 
-                                              'data-name="' + property.name.replace(/"/g, '&quot;') + '" ' + 
-                                              'data-measurement-id="' + (property.measurement_id || '') + '">' + 
-                                              property.name + '</option>';
-                                });
-                                
-                                $('#ga-property').html(options);
+                            if (response.success) {
+                                if (response.data.properties && response.data.properties.length > 0) {
+                                    console.log('Found ' + response.data.properties.length + ' properties');
+                                    
+                                    var options = '<option value=""><?php _e('-- Select Property --', 'uipress-analytics-bridge'); ?></option>';
+                                    
+                                    $.each(response.data.properties, function(i, property) {
+                                        console.log('Property:', property); // Debug: log each property
+                                        
+                                        // Check property has all required fields
+                                        if (property.id && property.name) {
+                                            options += '<option value="' + property.id + '" ' + 
+                                                      'data-type="' + (property.type || 'Unknown') + '" ' + 
+                                                      'data-name="' + property.name.replace(/"/g, '&quot;') + '" ' + 
+                                                      'data-measurement-id="' + (property.measurement_id || '') + '">' + 
+                                                      property.name + ' (' + (property.type || 'Unknown') + ')</option>';
+                                        } else {
+                                            console.error('Invalid property data:', property);
+                                        }
+                                    });
+                                    
+                                    $('#ga-property').html(options);
+                                } else {
+                                    console.log('No properties found');
+                                    $('#ga-property').html('<option value=""><?php _e('No properties found for this account', 'uipress-analytics-bridge'); ?></option>');
+                                    
+                                    if (response.data.message) {
+                                        alert(response.data.message);
+                                    }
+                                }
                             } else {
-                                $('#ga-property').html('<option value=""><?php _e('No properties found', 'uipress-analytics-bridge'); ?></option>');
+                                console.error('Error:', response.data ? response.data.message : 'Unknown error');
+                                $('#ga-property').html('<option value=""><?php _e('Error loading properties', 'uipress-analytics-bridge'); ?></option>');
+                                
+                                if (response.data && response.data.message) {
+                                    alert('Error: ' + response.data.message);
+                                }
                             }
                         },
-                        error: function() {
+                        error: function(xhr, status, error) {
+                            console.error('AJAX Error:', status, error);
                             $('#ga-property').prop('disabled', false)
                                 .html('<option value=""><?php _e('Error loading properties', 'uipress-analytics-bridge'); ?></option>');
+                            
+                            alert('Error loading properties: ' + error);
                         }
                     });
                 } else {
@@ -1104,24 +1131,43 @@ class UIPress_Analytics_Bridge_Admin {
             return;
         }
         
-        // In a real implementation, we would fetch properties from the Google Analytics API
-        // For demonstration, we'll return some sample properties
-        $properties = array(
-            array(
-                'id' => '123456789',
-                'name' => 'Example Website (UA)',
-                'type' => 'UA'
-            ),
-            array(
-                'id' => 'G-ABCDEFGHIJ',
-                'name' => 'Example Website (GA4)',
-                'type' => 'GA4',
-                'measurement_id' => 'G-ABCDEFGHIJ'
-            )
-        );
+        $account_id = isset($_POST['account_id']) ? sanitize_text_field($_POST['account_id']) : '';
         
+        if (empty($account_id)) {
+            wp_send_json_error(array('message' => __('No account ID provided.', 'uipress-analytics-bridge')));
+            return;
+        }
+        
+        // Get temporary tokens
+        $tokens = get_option('uipress_analytics_bridge_temp_tokens', array());
+        
+        if (empty($tokens) || empty($tokens['access_token'])) {
+            wp_send_json_error(array('message' => __('No authentication data found.', 'uipress-analytics-bridge')));
+            return;
+        }
+        
+        // Fetch properties from Google Analytics API
+        $properties = $this->get_analytics_properties_for_account($tokens['access_token'], $account_id);
+        
+        // Check if we got an error
+        if (is_array($properties) && isset($properties['error'])) {
+            wp_send_json_error(array('message' => $properties['error']));
+            return;
+        }
+        
+        // Check if we got any properties
+        if (empty($properties)) {
+            wp_send_json_success(array(
+                'properties' => array(),
+                'message' => __('No properties found for this account.', 'uipress-analytics-bridge')
+            ));
+            return;
+        }
+        
+        // Return the properties
         wp_send_json_success(array(
-            'properties' => $properties
+            'properties' => $properties,
+            'count' => count($properties)
         ));
     }
 
@@ -1233,6 +1279,148 @@ class UIPress_Analytics_Bridge_Admin {
             }
         }
     }
+
+    /**
+     * Get Google Analytics accounts.
+     *
+     * @since    1.0.0
+     * @param    string    $access_token    The access token.
+     * @return   array                      The accounts data.
+     */
+    private function get_google_analytics_accounts($access_token) {
+        // Make API request to get accounts
+        $response = wp_remote_get('https://www.googleapis.com/analytics/v3/management/accounts', array(
+            'headers' => array(
+                'Authorization' => 'Bearer ' . $access_token
+            ),
+            'timeout' => 15
+        ));
+        
+        // Check for errors
+        if (is_wp_error($response)) {
+            return array('error' => $response->get_error_message());
+        }
+        
+        // Parse response
+        $body = wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
+        
+        // Check for API errors
+        if (isset($data['error'])) {
+            return array('error' => $data['error']['message']);
+        }
+        
+        // Extract accounts information
+        $accounts = array();
+        if (isset($data['items']) && is_array($data['items'])) {
+            foreach ($data['items'] as $item) {
+                $accounts[] = array(
+                    'id' => $item['id'],
+                    'name' => $item['name']
+                );
+            }
+        }
+        
+        return $accounts;
+    }
+
+/**
+ * Get Google Analytics properties for an account.
+ *
+ * @since    1.0.0
+ * @param    string    $access_token    The access token.
+ * @param    string    $account_id      The account ID.
+ * @return   array                      The properties data.
+ */
+private function get_analytics_properties_for_account($access_token, $account_id) {
+    // Enable logging if in debug mode
+    $debug = get_option('uipress_analytics_bridge_advanced', array());
+    $debug_mode = isset($debug['debug_mode']) && $debug['debug_mode'];
+    
+    if ($debug_mode) {
+        error_log('UIPress Analytics Bridge: Getting properties for account ' . $account_id);
+    }
+    
+    // Make API request to get properties
+    $api_url = 'https://www.googleapis.com/analytics/v3/management/accounts/' . $account_id . '/webproperties';
+    
+    if ($debug_mode) {
+        error_log('UIPress Analytics Bridge: API URL: ' . $api_url);
+    }
+    
+    $response = wp_remote_get($api_url, array(
+        'headers' => array(
+            'Authorization' => 'Bearer ' . $access_token
+        ),
+        'timeout' => 15
+    ));
+    
+    // Check for errors
+    if (is_wp_error($response)) {
+        if ($debug_mode) {
+            error_log('UIPress Analytics Bridge: API Error: ' . $response->get_error_message());
+        }
+        return array('error' => $response->get_error_message());
+    }
+    
+    // Get response code
+    $response_code = wp_remote_retrieve_response_code($response);
+    if ($response_code !== 200) {
+        if ($debug_mode) {
+            error_log('UIPress Analytics Bridge: API returned non-200 status: ' . $response_code);
+        }
+    }
+    
+    // Parse response
+    $body = wp_remote_retrieve_body($response);
+    
+    if ($debug_mode) {
+        error_log('UIPress Analytics Bridge: API Response: ' . $body);
+    }
+    
+    $data = json_decode($body, true);
+    
+    // Check for API errors
+    if (isset($data['error'])) {
+        if ($debug_mode) {
+            error_log('UIPress Analytics Bridge: API Error in response: ' . json_encode($data['error']));
+        }
+        return array('error' => isset($data['error']['message']) ? $data['error']['message'] : 'Unknown API error');
+    }
+    
+    // Extract properties information
+    $properties = array();
+    if (isset($data['items']) && is_array($data['items'])) {
+        if ($debug_mode) {
+            error_log('UIPress Analytics Bridge: Found ' . count($data['items']) . ' properties');
+        }
+        
+        foreach ($data['items'] as $item) {
+            // Determine if this is GA4 or Universal Analytics
+            $is_ga4 = (isset($item['id']) && strpos($item['id'], 'G-') === 0);
+            
+            $property = array(
+                'id' => $item['id'],
+                'name' => $item['name'],
+                'type' => $is_ga4 ? 'GA4' : 'UA',
+                'measurement_id' => $is_ga4 ? $item['id'] : ''
+            );
+            
+            if ($debug_mode) {
+                error_log('UIPress Analytics Bridge: Property: ' . json_encode($property));
+            }
+            
+            $properties[] = $property;
+        }
+    } else {
+        if ($debug_mode) {
+            error_log('UIPress Analytics Bridge: No properties found in response');
+            error_log('UIPress Analytics Bridge: Response data: ' . json_encode($data));
+        }
+    }
+    
+    return $properties;
+}
 
     /**
      * Get OAuth URL.

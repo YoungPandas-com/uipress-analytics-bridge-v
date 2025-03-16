@@ -45,6 +45,15 @@ class UIPress_Analytics_Bridge {
     protected $version;
 
     /**
+     * Tracks whether UIPress is active.
+     *
+     * @since    1.0.0
+     * @access   protected
+     * @var      bool    $uipress_active    Whether UIPress is active.
+     */
+    protected $uipress_active;
+
+    /**
      * Define the core functionality of the plugin.
      *
      * Set the plugin name and the plugin version that can be used throughout the plugin.
@@ -170,9 +179,17 @@ class UIPress_Analytics_Bridge {
 
         $this->loader->add_action('admin_enqueue_scripts', $plugin_admin, 'enqueue_styles');
         $this->loader->add_action('admin_enqueue_scripts', $plugin_admin, 'enqueue_scripts');
-        $this->loader->add_action('admin_menu', $plugin_admin, 'add_settings_page');
+        
+        // Use priority 10 to ensure our menu item is registered properly
+        $this->loader->add_action('admin_menu', $plugin_admin, 'add_settings_page', 10);
+        
         $this->loader->add_action('admin_init', $plugin_admin, 'register_settings');
         $this->loader->add_filter('plugin_action_links_' . UIPRESS_ANALYTICS_BRIDGE_PLUGIN_BASENAME, $plugin_admin, 'add_action_links');
+        
+        // Add an admin notice after activation to guide users to the settings page
+        if (get_transient('uipress_analytics_bridge_activation_notice')) {
+            $this->loader->add_action('admin_notices', $plugin_admin, 'activation_notice');
+        }
     }
 
     /**
@@ -225,10 +242,12 @@ class UIPress_Analytics_Bridge {
         // Initialize the detector
         $detector = new UIPress_Analytics_Bridge_Detector($this->get_plugin_name(), $this->get_version());
         
-        // Only continue if the detector finds UIPress is active
-        if ($detector->is_uipress_active()) {
-            $this->loader->run();
-        }
+        // Always run the loader to ensure admin settings are available
+        // This ensures settings page shows up even if UIPress is not active
+        $this->loader->run();
+        
+        // Store the UIPress status for reference throughout the plugin
+        $this->uipress_active = $detector->is_uipress_active();
     }
 
     /**

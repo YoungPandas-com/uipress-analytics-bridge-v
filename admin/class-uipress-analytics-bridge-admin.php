@@ -113,14 +113,28 @@ class UIPress_Analytics_Bridge_Admin {
      * @since    1.0.0
      */
     public function add_settings_page() {
+        // Add to Settings menu
         add_submenu_page(
-            'options-general.php',
+            'options-general.php', 
             __('UIPress Analytics Bridge', 'uipress-analytics-bridge'),
             __('UIPress Analytics', 'uipress-analytics-bridge'),
             'manage_options',
             'uipress-analytics-bridge',
             array($this, 'display_settings_page')
         );
+        
+        // Optionally, also add as a top-level menu for better visibility
+        /* Uncomment this if you want a top-level menu
+        add_menu_page(
+            __('UIPress Analytics Bridge', 'uipress-analytics-bridge'),
+            __('UIPress Analytics', 'uipress-analytics-bridge'),
+            'manage_options',
+            'uipress-analytics-bridge',
+            array($this, 'display_settings_page'),
+            'dashicons-chart-area',
+            81
+        );
+        */
     }
 
     /**
@@ -739,5 +753,24 @@ class UIPress_Analytics_Bridge_Admin {
         );
         
         return intval($count);
+    }
+    
+    /**
+     * Display activation notice with link to settings.
+     *
+     * @since    1.0.0
+     */
+    public function activation_notice() {
+        ?>
+        <div class="notice notice-info is-dismissible">
+            <p>
+                <?php _e('Thank you for installing UIPress Analytics Bridge!', 'uipress-analytics-bridge'); ?> 
+                <a href="<?php echo admin_url('options-general.php?page=uipress-analytics-bridge'); ?>"><?php _e('Click here to configure the plugin settings', 'uipress-analytics-bridge'); ?></a>
+            </p>
+        </div>
+        <?php
+        
+        // Delete the transient so the notice doesn't keep showing
+        delete_transient('uipress_analytics_bridge_activation_notice');
     }
 }

@@ -121,13 +121,13 @@ function uipress_analytics_bridge_check_dependencies() {
         // Check for UIPress Lite
         if (!defined('uip_plugin_version')) {
             $plugin_dependencies_met = false;
-            $plugin_messages[] = __('UIPress Lite is required for UIPress Analytics Bridge.', 'uipress-analytics-bridge');
+            $plugin_messages[] = __('UIPress Lite is required for full functionality of UIPress Analytics Bridge.', 'uipress-analytics-bridge');
         }
         
         // Check for UIPress Pro
         if (!defined('uip_pro_plugin_version')) {
             $plugin_dependencies_met = false;
-            $plugin_messages[] = __('UIPress Pro is required for UIPress Analytics Bridge.', 'uipress-analytics-bridge');
+            $plugin_messages[] = __('UIPress Pro is required for full functionality of UIPress Analytics Bridge.', 'uipress-analytics-bridge');
         }
         
         // Store the result in a transient (cache for 1 hour)
@@ -170,16 +170,16 @@ function run_uipress_analytics_bridge() {
     // Set up debug mode if needed
     uipress_analytics_bridge_debug_mode();
     
-    // Check dependencies
-    if (!uipress_analytics_bridge_check_dependencies()) {
+    // Check dependencies (but continue loading for admin settings)
+    $dependencies_met = uipress_analytics_bridge_check_dependencies();
+    if (!$dependencies_met) {
         add_action('admin_notices', 'uipress_analytics_bridge_dependency_notice');
-        return;
     }
     
     // Required plugin class file
     require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/class-uipress-analytics-bridge.php';
     
-    // Execute the plugin
+    // Execute the plugin (always run for admin settings)
     $plugin = new UIPress_Analytics_Bridge();
     $plugin->run();
 }

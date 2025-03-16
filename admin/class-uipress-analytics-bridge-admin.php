@@ -42,6 +42,15 @@ class UIPress_Analytics_Bridge_Admin {
     public function __construct($plugin_name, $version) {
         $this->plugin_name = $plugin_name;
         $this->version = $version;
+        
+        // Add admin menu - using a direct approach for reliability
+        add_action('admin_menu', array($this, 'add_settings_page'));
+        
+        // Register plugin settings
+        add_action('admin_init', array($this, 'register_settings'));
+        
+        // Add settings link to plugins page
+        add_filter('plugin_action_links_' . UIPRESS_ANALYTICS_BRIDGE_PLUGIN_BASENAME, array($this, 'add_action_links'));
     }
 
     /**
@@ -102,7 +111,7 @@ class UIPress_Analytics_Bridge_Admin {
      */
     public function add_action_links($links) {
         $settings_link = array(
-            '<a href="' . admin_url('admin.php?page=uipress-analytics-bridge') . '">' . __('Settings', 'uipress-analytics-bridge') . '</a>',
+            '<a href="' . admin_url('options-general.php?page=uipress-analytics-bridge') . '">' . __('Settings', 'uipress-analytics-bridge') . '</a>',
         );
         return array_merge($settings_link, $links);
     }
@@ -114,27 +123,13 @@ class UIPress_Analytics_Bridge_Admin {
      */
     public function add_settings_page() {
         // Add to Settings menu
-        add_submenu_page(
-            'options-general.php', 
+        add_options_page(
             __('UIPress Analytics Bridge', 'uipress-analytics-bridge'),
             __('UIPress Analytics', 'uipress-analytics-bridge'),
             'manage_options',
             'uipress-analytics-bridge',
             array($this, 'display_settings_page')
         );
-        
-        // Optionally, also add as a top-level menu for better visibility
-        /* Uncomment this if you want a top-level menu
-        add_menu_page(
-            __('UIPress Analytics Bridge', 'uipress-analytics-bridge'),
-            __('UIPress Analytics', 'uipress-analytics-bridge'),
-            'manage_options',
-            'uipress-analytics-bridge',
-            array($this, 'display_settings_page'),
-            'dashicons-chart-area',
-            81
-        );
-        */
     }
 
     /**
@@ -457,13 +452,6 @@ class UIPress_Analytics_Bridge_Admin {
         // Get active tab
         $active_tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'general';
         
-        // Create instance of detector to check UIPress
-        require_once UIPRESS_ANALYTICS_BRIDGE_PLUGIN_PATH . 'includes/class-uipress-analytics-bridge-detector.php';
-        $detector = new UIPress_Analytics_Bridge_Detector($this->plugin_name, $this->version);
-        $uipress_active = $detector->is_uipress_active();
-        $uipress_features = $detector->get_uipress_features();
-        $uipress_paths = $detector->get_uipress_class_paths();
-        
         // Check for saved settings notice
         $settings_updated = isset($_GET['settings-updated']) ? true : false;
         
@@ -482,20 +470,12 @@ class UIPress_Analytics_Bridge_Admin {
             }
             
             // Show notice if UIPress is not active
-            if (!$uipress_active) {
+            if (!defined('uip_plugin_version') || !defined('uip_pro_plugin_version')) {
                 ?>
-                <div class="notice notice-error">
-                    <p><?php _e('UIPress Lite and Pro are required for this plugin to function properly.', 'uipress-analytics-bridge'); ?></p>
+                <div class="notice notice-warning">
+                    <p><?php _e('UIPress Lite and Pro are recommended for full functionality of this plugin.', 'uipress-analytics-bridge'); ?></p>
                 </div>
                 <?php
-            } else {
-                if (!$uipress_features['google_analytics']) {
-                    ?>
-                    <div class="notice notice-warning">
-                        <p><?php _e('UIPress Google Analytics functionality was not detected. This plugin may not work correctly.', 'uipress-analytics-bridge'); ?></p>
-                    </div>
-                    <?php
-                }
             }
             ?>
             
@@ -514,32 +494,6 @@ class UIPress_Analytics_Bridge_Admin {
                         submit_button();
                         ?>
                     </form>
-                    
-                    <?php if ($uipress_active && !empty(get_option('uipress_analytics_bridge_settings')['client_id'])) : ?>
-                        <div class="uipress-analytics-card">
-                            <h3><?php _e('Authentication Status', 'uipress-analytics-bridge'); ?></h3>
-                            <p><?php _e('Check your authentication status with Google Analytics.', 'uipress-analytics-bridge'); ?></p>
-                            
-                            <div class="uipress-analytics-auth-status">
-                                <p><strong><?php _e('Global Authentication:', 'uipress-analytics-bridge'); ?></strong> 
-                                    <span id="uipress-global-auth-status">
-                                        <?php $this->display_auth_status(false); ?>
-                                    </span>
-                                </p>
-                                
-                                <p><strong><?php _e('User Authentication:', 'uipress-analytics-bridge'); ?></strong> 
-                                    <span id="uipress-user-auth-status">
-                                        <?php $this->display_auth_status(true); ?>
-                                    </span>
-                                </p>
-                                
-                                <div class="uipress-analytics-auth-buttons">
-                                    <button id="uipress-global-auth-button" class="button button-primary"><?php _e('Authenticate Globally', 'uipress-analytics-bridge'); ?></button>
-                                    <button id="uipress-user-auth-button" class="button button-secondary"><?php _e('Authenticate User', 'uipress-analytics-bridge'); ?></button>
-                                </div>
-                            </div>
-                        </div>
-                    <?php endif; ?>
                     
                 <?php elseif ($active_tab === 'advanced') : ?>
                     <form method="post" action="options.php">
@@ -565,27 +519,12 @@ class UIPress_Analytics_Bridge_Admin {
                                     <td><?php echo defined('uip_pro_plugin_version') ? '<span class="uipress-status-active">Active (' . esc_html(uip_pro_plugin_version) . ')</span>' : '<span class="uipress-status-inactive">Inactive</span>'; ?></td>
                                 </tr>
                                 <tr>
-                                    <th><?php _e('Google Analytics Support:', 'uipress-analytics-bridge'); ?></th>
-                                    <td><?php echo $uipress_features['google_analytics'] ? '<span class="uipress-status-active">Detected</span>' : '<span class="uipress-status-inactive">Not Detected</span>'; ?></td>
-                                </tr>
-                                <tr>
                                     <th><?php _e('API Credentials:', 'uipress-analytics-bridge'); ?></th>
                                     <td><?php echo !empty(get_option('uipress_analytics_bridge_settings')['client_id']) ? '<span class="uipress-status-active">Configured</span>' : '<span class="uipress-status-inactive">Not Configured</span>'; ?></td>
                                 </tr>
                                 <tr>
                                     <th><?php _e('Debug Mode:', 'uipress-analytics-bridge'); ?></th>
                                     <td><?php echo !empty(get_option('uipress_analytics_bridge_advanced')['debug_mode']) ? '<span class="uipress-status-warning">Enabled</span>' : '<span class="uipress-status-active">Disabled</span>'; ?></td>
-                                </tr>
-                                <tr>
-                                    <th><?php _e('Cache Status:', 'uipress-analytics-bridge'); ?></th>
-                                    <td>
-                                        <?php 
-                                        $cache_count = $this->get_cache_count();
-                                        echo $cache_count > 0 ? 
-                                            '<span class="uipress-status-active">' . sprintf(_n('%d item cached', '%d items cached', $cache_count, 'uipress-analytics-bridge'), $cache_count) . '</span>' : 
-                                            '<span class="uipress-status-inactive">No cache</span>'; 
-                                        ?>
-                                    </td>
                                 </tr>
                                 <tr>
                                     <th><?php _e('PHP Version:', 'uipress-analytics-bridge'); ?></th>
@@ -614,100 +553,10 @@ class UIPress_Analytics_Bridge_Admin {
                             </tbody>
                         </table>
                     </div>
-                    
-                    <div class="uipress-analytics-card">
-                        <h3><?php _e('UIPress Class Paths', 'uipress-analytics-bridge'); ?></h3>
-                        <p><?php _e('These paths are used by the bridge to communicate with UIPress.', 'uipress-analytics-bridge'); ?></p>
-                        
-                        <table class="widefat" cellspacing="0">
-                            <tbody>
-                                <tr>
-                                    <th><?php _e('Google Analytics Class:', 'uipress-analytics-bridge'); ?></th>
-                                    <td><?php echo $uipress_paths['google_analytics'] ? '<span class="uipress-status-active">' . esc_html($uipress_paths['google_analytics']) . '</span>' : '<span class="uipress-status-inactive">Not Found</span>'; ?></td>
-                                </tr>
-                                <tr>
-                                    <th><?php _e('AJAX Utils Class:', 'uipress-analytics-bridge'); ?></th>
-                                    <td><?php echo $uipress_paths['ajax_utils'] ? '<span class="uipress-status-active">' . esc_html($uipress_paths['ajax_utils']) . '</span>' : '<span class="uipress-status-inactive">Not Found</span>'; ?></td>
-                                </tr>
-                                <tr>
-                                    <th><?php _e('Sanitize Utils Class:', 'uipress-analytics-bridge'); ?></th>
-                                    <td><?php echo $uipress_paths['sanitize_utils'] ? '<span class="uipress-status-active">' . esc_html($uipress_paths['sanitize_utils']) . '</span>' : '<span class="uipress-status-inactive">Not Found</span>'; ?></td>
-                                </tr>
-                                <tr>
-                                    <th><?php _e('User Preferences Class:', 'uipress-analytics-bridge'); ?></th>
-                                    <td><?php echo $uipress_paths['user_preferences'] ? '<span class="uipress-status-active">' . esc_html($uipress_paths['user_preferences']) . '</span>' : '<span class="uipress-status-inactive">Not Found</span>'; ?></td>
-                                </tr>
-                                <tr>
-                                    <th><?php _e('UIPress Options Class:', 'uipress-analytics-bridge'); ?></th>
-                                    <td><?php echo $uipress_paths['uip_options'] ? '<span class="uipress-status-active">' . esc_html($uipress_paths['uip_options']) . '</span>' : '<span class="uipress-status-inactive">Not Found</span>'; ?></td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    
-                    <div class="uipress-analytics-card">
-                        <h3><?php _e('Tools', 'uipress-analytics-bridge'); ?></h3>
-                        
-                        <p><a href="#" id="uip-analytics-refresh-status" class="button button-secondary"><?php _e('Refresh Status', 'uipress-analytics-bridge'); ?></a>
-                        <a href="#" id="uip-analytics-clear-cache-all" class="button button-secondary"><?php _e('Clear All Caches', 'uipress-analytics-bridge'); ?></a>
-                        <a href="#" id="uip-analytics-test-connection" class="button button-primary"><?php _e('Test API Connection', 'uipress-analytics-bridge'); ?></a></p>
-                        
-                        <div id="uip-analytics-test-result" class="uipress-analytics-test-result" style="display: none;"></div>
-                    </div>
                 <?php endif; ?>
             </div>
         </div>
         <?php
-    }
-
-    /**
-     * Display authentication status.
-     *
-     * @since    1.0.0
-     * @param    bool      $use_user_preferences    Whether to use user preferences.
-     */
-    private function display_auth_status($use_user_preferences = false) {
-        $auth_data = $this->get_auth_data($use_user_preferences);
-        
-        if (is_array($auth_data) && isset($auth_data['view']) && $auth_data['view'] && isset($auth_data['token']) && $auth_data['token']) {
-            $is_ga4 = isset($auth_data['gafour']) && $auth_data['gafour'];
-            $property_type = $is_ga4 ? 'GA4' : 'Universal Analytics';
-            $property_id = sanitize_text_field($auth_data['view']);
-            
-            echo '<span class="uipress-status-active">' . __('Connected', 'uipress-analytics-bridge') . ' (' . esc_html($property_type) . ': ' . esc_html($property_id) . ')</span>';
-        } else {
-            echo '<span class="uipress-status-inactive">' . __('Not Connected', 'uipress-analytics-bridge') . '</span>';
-        }
-    }
-
-    /**
-     * Get authentication data.
-     *
-     * @since    1.0.0
-     * @param    bool      $use_user_preferences    Whether to use user preferences.
-     * @return   array                              The authentication data.
-     */
-    private function get_auth_data($use_user_preferences = false) {
-        if ($use_user_preferences) {
-            // Use UserPreferences class if available
-            if (class_exists('UipressLite\Classes\App\UserPreferences')) {
-                return \UipressLite\Classes\App\UserPreferences::get('google_analytics');
-            } else {
-                // Fallback to direct user meta
-                $user_id = get_current_user_id();
-                $user_prefs = get_user_meta($user_id, 'uip-prefs', true);
-                return isset($user_prefs['google_analytics']) ? $user_prefs['google_analytics'] : array();
-            }
-        } else {
-            // Use UipOptions class if available
-            if (class_exists('UipressLite\Classes\App\UipOptions')) {
-                return \UipressLite\Classes\App\UipOptions::get('google_analytics');
-            } else {
-                // Fallback to direct option
-                $options = get_option('uip-global-settings', array());
-                return isset($options['google_analytics']) ? $options['google_analytics'] : array();
-            }
-        }
     }
 
     /**
@@ -733,44 +582,5 @@ class UIPress_Analytics_Bridge_Admin {
                 delete_transient($transient_name);
             }
         }
-    }
-
-    /**
-     * Get count of cached items.
-     *
-     * @since    1.0.0
-     * @return   int      Number of cached items.
-     */
-    private function get_cache_count() {
-        global $wpdb;
-        
-        // Count transients with our prefix
-        $count = $wpdb->get_var(
-            $wpdb->prepare(
-                "SELECT COUNT(*) FROM $wpdb->options WHERE option_name LIKE %s",
-                $wpdb->esc_like('_transient_uipress_analytics_bridge_') . '%'
-            )
-        );
-        
-        return intval($count);
-    }
-    
-    /**
-     * Display activation notice with link to settings.
-     *
-     * @since    1.0.0
-     */
-    public function activation_notice() {
-        ?>
-        <div class="notice notice-info is-dismissible">
-            <p>
-                <?php _e('Thank you for installing UIPress Analytics Bridge!', 'uipress-analytics-bridge'); ?> 
-                <a href="<?php echo admin_url('options-general.php?page=uipress-analytics-bridge'); ?>"><?php _e('Click here to configure the plugin settings', 'uipress-analytics-bridge'); ?></a>
-            </p>
-        </div>
-        <?php
-        
-        // Delete the transient so the notice doesn't keep showing
-        delete_transient('uipress_analytics_bridge_activation_notice');
     }
 }

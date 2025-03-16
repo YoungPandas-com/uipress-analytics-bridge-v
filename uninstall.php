@@ -17,9 +17,11 @@ $remove_data = isset($settings['remove_data_on_uninstall']) ? $settings['remove_
 
 // Only delete data if the setting is enabled
 if ($remove_data) {
-    // Delete plugin options
+    // Delete all plugin options
     delete_option('uipress_analytics_bridge_settings');
     delete_option('uipress_analytics_bridge_advanced');
+    delete_option('uipress_analytics_bridge_connection');
+    delete_option('uipress_analytics_bridge_temp_tokens');
     
     // Clear all transients
     global $wpdb;
@@ -37,6 +39,26 @@ if ($remove_data) {
         foreach ($transients as $transient) {
             $transient_name = str_replace('_transient_', '', $transient);
             delete_transient($transient_name);
+        }
+    }
+    
+    // Clean up UIPress integration data if UIPress is active
+    if (defined('uip_plugin_version') || defined('uip_pro_plugin_version')) {
+        // Clean up global UIPress options
+        $uip_options = get_option('uip-global-settings', array());
+        if (is_array($uip_options) && isset($uip_options['google_analytics'])) {
+            unset($uip_options['google_analytics']);
+            update_option('uip-global-settings', $uip_options);
+        }
+        
+        // Clean up user-specific UIPress preferences
+        $users = get_users(array('fields' => 'ID'));
+        foreach ($users as $user_id) {
+            $user_prefs = get_user_meta($user_id, 'uip-prefs', true);
+            if (is_array($user_prefs) && isset($user_prefs['google_analytics'])) {
+                unset($user_prefs['google_analytics']);
+                update_user_meta($user_id, 'uip-prefs', $user_prefs);
+            }
         }
     }
 }
